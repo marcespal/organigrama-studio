@@ -68,6 +68,40 @@ El panel Normativa reporta el escalonado como desviación, y lo marca como incum
 desplazamiento es tan grande que se lee como otro nivel. El botón **Normativa** trae esta misma
 explicación para citarla.
 
+## Bandas de nivel: alinear por rango del puesto
+
+Un coordinador que reporta al gerente general no es una gerencia, y conviene que se vea. Para eso
+están las **bandas**: filas horizontales que corresponden al **rango del puesto** (Gerencia,
+Jefatura, Coordinación, Analista, Asistente), no a la profundidad de dependencia.
+
+- Campo **Altura (banda)** en el panel de la unidad: la alinea a la banda que elijas. Su subárbol
+  la sigue, así que los subordinados de ese coordinador caen a la altura de los analistas.
+- Nunca puede quedar por encima de su jefe: la herramienta fuerza al menos una banda debajo.
+- **El nivel jerárquico real no cambia.** El CSV, el cuadro resumen y el conteo de niveles siguen
+  contando la unidad donde le corresponde por dependencia; solo cambia el dibujo. El CSV trae las
+  dos cosas: columna *Nivel* (dependencia) y columna *Banda visual* (rango).
+- **Rotula las bandas** en Presentación → *Rotular las bandas de nivel*. Los rótulos salen al margen
+  izquierdo con una guía punteada. Esto es lo que hace legítima la lectura: la doctrina llama
+  "niveles jerárquicos" a las bandas de rango (directivo, medio, operativo), y el organigrama es
+  correcto siempre que el lector sepa qué convención se está usando.
+- Sin rótulos, el panel Normativa lo reporta como desviación: la altura se leería como dependencia.
+
+Para ajustes de pocos píxeles entre pares (analista y asistente del mismo jefe) usa **Escalonado**,
+que es independiente y se suma a la banda.
+
+## Áreas por color
+
+Campo **Color del área** en el panel de la unidad: pinta esa unidad **y todo lo que depende de
+ella**. El color se hereda, no se copia, así que si mueves una unidad a otra área toma el color
+nuevo sola. `Color de esta caja` sigue existiendo y manda sobre el área.
+
+Las áreas declaradas aparecen en la **simbología** con su color y su nombre. Si hay áreas y la
+simbología está oculta, el auditor avisa: sin declarar, el color es decoración que el lector tiene
+que adivinar.
+
+Indispensable en organigramas grandes: en el del club, pintar la gerencia deportiva de un color
+permite ubicarla de un golpe de vista entre 50 cajas.
+
 ## Tipos de unidad y su trazo
 
 | Tipo | Trazo | Regla que aplica |
@@ -101,7 +135,11 @@ Criterios de **precisión, presentación, sencillez, uniformidad y vigencia**:
 - contraste texto/fondo menor a 4.5:1;
 - cajas con color propio cuando está activo el candado de uniformidad;
 - unidades escalonadas respecto de sus pares, y escalonado tan grande que se lee como otro nivel;
-- unidades sin n.º de personas y contenido del cajetín que no corresponde a las plazas consignadas.
+- unidades sin n.º de personas y contenido del cajetín que no corresponde a las plazas consignadas;
+- unidades alineadas a otra banda sin que las bandas estén rotuladas;
+- áreas coloreadas con la simbología oculta;
+- unidades con el mismo nombre **bajo el mismo jefe** (que "Preparador Físico" se repita en varios
+  equipos es correcto y no se reporta).
 
 Por construcción la herramienta ya garantiza: cajas de dimensión uniforme, un solo tipo de figura,
 textos horizontales, grosor de línea constante en todos los niveles, sin flechas descendentes,
@@ -116,7 +154,7 @@ municipios de México). El botón **Normativa** de la barra superior tiene el de
 
 | Formato | Uso | Detalle |
 |---|---|---|
-| PNG | pegar en Word, presentaciones, WhatsApp | escala 2x a 8x; el ejemplo a 3x sale en 5934×2541 px |
+| PNG | pegar en Word, presentaciones, WhatsApp | escala 2x a 8x; el ejemplo a 3x sale en 5934×2541 px. En organigramas muy anchos la escala se baja sola: los navegadores no dibujan más de ~16.000 px por lado |
 | SVG | imprenta, seguir editando en Illustrator/Inkscape | vectorial, texto real |
 | PDF | anexo de un estatuto o manual | vía diálogo de impresión, vectorial; A4/A3/Carta, vertical o apaisado |
 | CSV | padrón de plazas en Excel | nivel, unidad, jefe, categoría, personas, total del área |
@@ -129,7 +167,9 @@ Para el PDF: botón **PDF** y en el diálogo del navegador elegir "Guardar como 
 ```
 { v, root, meta{titulo,subtitulo,unidad,fecha,aprobado,ambito,contenido},
   cfg{modo,w,h,gapH,gapN,gapS,g,fs,colores...},
-  nodes{ id:{id,parent,tipo,titulo,titular,funciones[],lado,ord,color,personas,categoria,desnivel} },
+  cfg{... verBandas, bandas[], pasoDesnivel},
+  nodes{ id:{id,parent,tipo,titulo,titular,funciones[],lado,ord,color,areaColor,
+             personas,categoria,desnivel,nivelVisual} },
   rel[{a,b,tipo}], view{x,y,z} }
 ```
 
@@ -155,6 +195,7 @@ Antes de entregar: poner `activo:true`, fijar `caduca`, y renombrar el archivo s
 - Plantillas de estructura (organización deportiva, pyme, institución pública).
 - Foto o iniciales del titular en la caja.
 - Plazas ocupadas frente a vacantes (hoy es un solo número por unidad).
+- Generar los organigramas **específicos** por área a partir del general, en un clic.
 
 ---
 

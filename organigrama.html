@@ -345,7 +345,7 @@ const RELS = {
 /* ================================ ESTADO ================================= */
 function nodo(id, parent, tipo, titulo, ord){
   return { id, parent, tipo, titulo, titular:"", funciones:[], lado:"L", ord:ord||0, color:"",
-           personas:null, categoria:"", desnivel:0 };
+           personas:null, categoria:"", desnivel:0, nivelVisual:null, areaColor:"" };
 }
 /* ---- plazas ---- */
 const tienePlazas = n => !(n.personas === null || n.personas === undefined || n.personas === "");
@@ -356,6 +356,25 @@ function totalArea(id){
   return t;
 }
 const totalGeneral = () => Object.values(S.nodes).reduce((a,n) => a + plazasProp(n), 0);
+/* color de área: se hereda del ancestro más cercano que lo tenga declarado */
+function colorDe(id){
+  let n = S.nodes[id], g = 0;
+  if(n && n.color) return n.color;
+  while(n && g++ < 80){
+    if(n.areaColor) return n.areaColor;
+    n = n.parent ? S.nodes[n.parent] : null;
+  }
+  return null;
+}
+function areaDe(id){
+  let n = S.nodes[id], g = 0;
+  while(n && g++ < 80){
+    if(n.areaColor) return n;
+    n = n.parent ? S.nodes[n.parent] : null;
+  }
+  return null;
+}
+const areasDeclaradas = () => Object.values(S.nodes).filter(n => n.areaColor);
 /* escalonado: baja la caja respecto de sus pares sin cambiarle el nivel jerárquico */
 function desnivelDe(id){
   const n = S.nodes[id];
@@ -380,7 +399,8 @@ function blankState(){
           uniformidad:true, tintarStaff:false, verTitular:true, verFunciones:false,
           verCajetin:true, verLeyenda:true, tramoMax:7, nivelMax:5,
           verPlazas:true, verAcumulado:true, verResumen:true, resumenNivel:1, resumenPor:"ambos",
-          pasoDesnivel:24 },
+          pasoDesnivel:24, verBandas:false,
+          bandas:["Gerencia","Jefatura","Coordinación","Analista","Asistente","Operativo","",""] },
     nodes:{ [r]: nodo(r, null, "linea", "Dirección General", 0) },
     rel:[], view:{ x:0, y:0, z:1 }
   };
@@ -389,6 +409,7 @@ let S = blankState();
 let sel = null;                 /* id del nodo seleccionado */
 let P = {};                       /* id -> {x,y,w,h,d} en coordenadas del diagrama */
 let CAJ = null, LEY = null, RES = null;  /* cajetín, leyenda y cuadro resumen */
+let BAN = null;                          /* bandas de nivel jerárquico */
 let coordMode = false, coordFrom = null;
 let undoStack = [], redoStack = [], saveTimer = null;
 const LS_KEY = "org-studio-v1", LS_THEME = "org-studio-theme";
@@ -509,8 +530,11 @@ function layout(){
       if(need > rg[d]) rg[d] = need;
     }
   });
+  /* bandas de más, para poder bajar una caja por debajo del último nivel */
+  const nBandas = maxD + 5;
+  for(let d = maxD + 1; d <= nBandas; d++) rg[d] = c.gapN;
   const rowPos = [0];
-  for(let d = 1; d <= maxD; d++) rowPos[d] = rowPos[d-1] + D + rg[d-1];
+  for(let d = 1; d <= nBandas; d++) rowPos[d] = rowPos[d-1] + D + rg[d-1];
 
   /* 3. reparto en el eje along */
   const pos = {};
@@ -550,8 +574,28 @@ function layout(){
     P[id] = vert ? { x: along - c.w/2, y: depth, w: c.w, h: c.h, d: d }
                  : { x: depth, y: along - c.h/2, w: c.w, h: c.h, d: d };
   };
-  Object.keys(prof).forEach(id =>
-    put(id, pos[id], rowPos[prof[id]] + desnivelDe(id)*c.pasoDesnivel, prof[id]));
+  /* Banda visual de cada unidad. Por omisión es su nivel de dependencia; si la
+     unidad declara nivelVisual se la alinea a esa banda y su subárbol la sigue.
+     Nunca puede quedar por encima de su jefe: se fuerza al menos una banda abajo. */
+  const banda = {}, depthPos = {};
+  (function walk(id, dB, bandaJefe){
+    let b = prof[id] + dB;
+    const nv = S.nodes[id].nivelVisual;
+    if(nv !== null && nv !== undefined && nv !== ""){
+      b = Math.round(+nv) || 0;
+      if(bandaJefe !== null) b = Math.max(b, bandaJefe + 1);
+      b = Math.max(0, Math.min(nBandas, b));
+      dB = b - prof[id];
+    }
+    b = Math.max(0, Math.min(nBandas, b));
+    banda[id] = b;
+    depthPos[id] = rowPos[b] + desnivelDe(id)*c.pasoDesnivel;
+    kidsTree(id).forEach(k => walk(k.id, dB, b));
+  })(S.root, 0, null);
+  Object.keys(prof).forEach(id => {
+    put(id, pos[id], depthPos[id], prof[id]);
+    P[id].b = banda[id];
+  });
 
   /* 5. unidades adosadas (asesorías, consejos, comisiones).
         Se recorre en cola para que una asesoría colgada de otra tampoco se pierda. */
@@ -572,13 +616,21 @@ function layout(){
       const i = izq ? iL++ : iR++;
       put(k.id, alongBase + (izq ? -1 : 1) * (A + gapS), depthBase + i*(D + 12), nivel);
       P[k.id].adosado = true; P[k.id].jefe = id;
+      P[k.id].b = (pp.b || 0) + (conHijos ? 1 : 0);
       cola.push(k.id);
     });
   }
 
-  /* 6. cuadro resumen, cajetín y leyenda, abajo del diagrama */
+  /* 6. bandas rotuladas, cuadro resumen, cajetín y leyenda */
   const b = bboxNodos();
-  CAJ = LEY = RES = null;
+  CAJ = LEY = RES = BAN = null;
+  if(c.verBandas){
+    const maxB = Math.max.apply(null, Object.values(P).map(p => p.b || 0));
+    const rot = [];
+    for(let i = 0; i <= maxB; i++) if((c.bandas[i] || "").trim())
+      rot.push({ i: i, nom: c.bandas[i].trim(), pos: rowPos[i] });
+    if(rot.length) BAN = { rot: rot, D: D, vert: vert, x: b.x, y: b.y, x2: b.x2, y2: b.y2 };
+  }
   let yb = b.y2 + 34;
   if(c.verResumen && c.verPlazas){
     const filas = resumenFilas();
@@ -591,8 +643,10 @@ function layout(){
   if(c.verLeyenda){
     const usados = relsUsadas();
     const nota = c.verPlazas && totalGeneral() > 0;
-    LEY = usados.length ? { x: b.x, y: b.y2 + 34, w: 258,
-      h: 26 + usados.length*17 + (nota ? 30 : 0), rels: usados, nota: nota } : null;
+    const ars = areasDeclaradas();
+    if(usados.length || ars.length) LEY = { x: b.x, y: b.y2 + 34, w: 258,
+      h: 26 + usados.length*17 + (nota ? 30 : 0) + (ars.length ? 22 + ars.length*15 : 0),
+      rels: usados, nota: nota, areas: ars };
   }
 }
 /* Filas del cuadro resumen. Las sumas cierran: lo que no cae en el nivel
@@ -644,6 +698,7 @@ function bboxTotal(){
     x = Math.min(x, r.x); y = Math.min(y, r.y);
     x2 = Math.max(x2, r.x + r.w); y2 = Math.max(y2, r.y + r.h);
   });
+  if(BAN){ if(BAN.vert) x -= 132; else y -= 30; }
   return { x, y, w: x2-x, h: y2-y };
 }
 function relsUsadas(){
@@ -731,6 +786,22 @@ function lineasSVG(){
   });
   return out;
 }
+function bandasSVG(){
+  if(!BAN) return "";
+  let out = `<g class="ban">`;
+  BAN.rot.forEach(r => {
+    if(BAN.vert){
+      const cy = r.pos + BAN.D/2;
+      out += `<path class="bl" d="M${BAN.x-118} ${cy} H${BAN.x2}"/>`
+           + `<text class="bt2" x="${BAN.x-126}" y="${cy+3.5}">${esc(r.nom)}</text>`;
+    } else {
+      const cx = r.pos + BAN.D/2;
+      out += `<path class="bl" d="M${cx} ${BAN.y-22} V${BAN.y2}"/>`
+           + `<text class="bt3" x="${cx}" y="${BAN.y-26}">${esc(r.nom)}</text>`;
+    }
+  });
+  return out + `</g>`;
+}
 function nodosSVG(){
   const c = S.cfg;
   let out = "";
@@ -740,8 +811,9 @@ function nodosSVG(){
     const pl = plan(n);
     let fill = c.colFondo;
     if(c.porNivel) fill = c.nivel[Math.min(p.d, c.nivel.length-1)] || c.colFondo;
+    const ca = colorDe(id);
+    if(ca) fill = ca;
     if(c.tintarStaff && !TIPOS[n.tipo].arbol) fill = mezcla(fill, "#000000", .06);
-    if(n.color) fill = n.color;
     const cls = "nd" + (id === sel ? " sel" : "");
     const s = sellos(n);
     /* el texto se centra en el espacio libre: nunca pasa por debajo del sello */
@@ -825,6 +897,15 @@ function cajetinSVG(){
            + selloSVG(LEY.x+8, y+7, "Σn", " ac")
            + `<text class="cv2" x="${LEY.x+60}" y="${y+18.5}">Total del área, con dependencias</text>`;
     }
+    if(LEY.areas && LEY.areas.length){
+      let y = LEY.y + 30 + LEY.rels.length*17 + (LEY.nota ? 30 : 0) + 8;
+      out += `<text class="ck" x="${LEY.x+8}" y="${y}">ÁREAS</text>`;
+      LEY.areas.forEach((n,i) => {
+        const yy = y + 15 + i*15;
+        out += `<rect x="${LEY.x+8}" y="${yy-9}" width="44" height="11" rx="2" fill="${n.areaColor}" stroke="${S.cfg.colBorde}" stroke-width=".7"/>`
+             + `<text class="cv2" x="${LEY.x+60}" y="${yy}">${esc(n.titulo || "(sin nombre)")}</text>`;
+      });
+    }
     out += `</g>`;
   }
   return out;
@@ -848,10 +929,15 @@ function svgCSS(){
 .caj text.ck{font:600 9.5px "Segoe UI",system-ui,Arial,sans-serif;fill:${mezcla(c.colTexto,"#ffffff",.3)};letter-spacing:.4px}
 .caj text.cv{font:400 10px "Segoe UI",system-ui,Arial,sans-serif;fill:${c.colTexto};text-anchor:end}
 .caj text.cv2{font:400 10px "Segoe UI",system-ui,Arial,sans-serif;fill:${c.colTexto}}
-.caj text.cs{font:400 11px "Segoe UI",system-ui,Arial,sans-serif;fill:${mezcla(c.colTexto,"#ffffff",.3)}}`;
+.caj text.cs{font:400 11px "Segoe UI",system-ui,Arial,sans-serif;fill:${mezcla(c.colTexto,"#ffffff",.3)}}
+.ban .bl{stroke:${mezcla(c.colBorde,"#ffffff",.72)};stroke-width:1;stroke-dasharray:1 5;fill:none}
+.ban text.bt2{font:600 10px "Segoe UI",system-ui,Arial,sans-serif;fill:${mezcla(c.colTexto,"#ffffff",.28)};
+  text-anchor:end;letter-spacing:.4px;text-transform:uppercase}
+.ban text.bt3{font:600 10px "Segoe UI",system-ui,Arial,sans-serif;fill:${mezcla(c.colTexto,"#ffffff",.28)};
+  text-anchor:middle;letter-spacing:.4px}`;
 }
 function mundoSVG(){
-  return lineasSVG() + nodosSVG() + cajetinSVG();
+  return bandasSVG() + lineasSVG() + nodosSVG() + cajetinSVG();
 }
 function renderCanvas(){
   layout();
@@ -897,13 +983,16 @@ function auditar(){
   const sinNombre = nodos.filter(n => !n.titulo.trim()).length;
   if(sinNombre) E(`${sinNombre} unidad(es) sin nombre. El criterio de precisión exige definir todas las unidades con exactitud.`);
 
+  /* solo es ambiguo si dos unidades con el mismo nombre dependen del mismo jefe;
+     que "Preparador Físico" se repita en varios equipos es correcto */
   const vistos = {}, dup = [];
   nodos.forEach(n => {
-    const k = n.titulo.trim().toLowerCase();
-    if(!k) return;
+    const k = (n.parent || "-") + "|" + n.titulo.trim().toLowerCase();
+    if(!n.titulo.trim()) return;
     if(vistos[k]) { if(dup.indexOf(n.titulo) < 0) dup.push(n.titulo); } else vistos[k] = 1;
   });
-  if(dup.length) W("Nombres repetidos: " + dup.slice(0,4).map(esc).join(", ") + ". Dos unidades no deben llamarse igual.");
+  if(dup.length) W("Unidades con el mismo nombre bajo el mismo jefe: " + dup.slice(0,4).map(esc).join(", ")
+    + ". Ahí sí hay ambigüedad: distínguelas (por categoría, equipo o especialidad).");
 
   const tramos = nodos.map(n => ({ n, k: kidsTree(n.id).length })).filter(x => x.k > c.tramoMax);
   if(tramos.length) W(`Tramo de control amplio (más de ${c.tramoMax} subordinados directos) en: `
@@ -941,6 +1030,19 @@ function auditar(){
     if(sinDato) W(`${sinDato} unidad(es) sin n.º de personas: el resumen las cuenta como 0 y el total puede quedar corto.`);
     G(`Plantilla declarada: ${tot} personas. Los acumulados por área cierran contra ese total.`);
   }
+  const realineadas = nodos.filter(n => n.nivelVisual !== null && n.nivelVisual !== undefined && n.nivelVisual !== "");
+  if(realineadas.length){
+    const rotuladas = (c.bandas || []).some(x => (x||"").trim()) && c.verBandas;
+    if(rotuladas) G(`${realineadas.length} unidad(es) alineadas a su banda de rango, con las bandas rotuladas: la altura se lee como nivel de puesto, no como profundidad de dependencia.`);
+    else W(`${realineadas.length} unidad(es) alineadas a una banda distinta de su nivel de dependencia
+      (${realineadas.slice(0,3).map(n => esc(n.titulo)).join(", ")}). <b>Rotula las bandas</b> en Presentación
+      (Gerencia, Jefatura, Coordinación…): sin rótulo el lector interpreta la altura como dependencia y el
+      organigrama dice algo distinto de lo que quieres.`);
+  }
+  const ars = areasDeclaradas();
+  if(ars.length && !c.verLeyenda) W(`Hay ${ars.length} área(s) coloreadas pero la simbología está oculta.
+    Actívala para que el color quede declarado; si no, es decoración que el lector tiene que adivinar.`);
+  else if(ars.length) G(`${ars.length} área(s) diferenciadas por color y declaradas en la simbología.`);
   const escal = nodos.filter(n => desnivelDe(n.id) > 0);
   if(escal.length){
     W(`${escal.length} unidad(es) escalonadas respecto de sus pares (${escal.slice(0,3).map(n => esc(n.titulo)).join(", ")}).
@@ -949,7 +1051,7 @@ function auditar(){
     const off = Math.max.apply(null, escal.map(n => desnivelDe(n.id))) * c.pasoDesnivel;
     if(off > (c.h + c.gapN)/2) E(`El escalonado llega a ${off} px y se lee como un nivel jerárquico distinto.
       Reduce el "Paso del escalonado" o cuelga esa unidad de quien realmente la supervisa.`);
-  } else G("Niveles jerárquicos alineados: la altura corresponde al nivel.");
+  } else if(!realineadas.length) G("Niveles jerárquicos alineados: la altura corresponde al nivel.");
   G("Cajas de dimensión uniforme: el tamaño no indica jerarquía.");
   G("Líneas de mando sin flechas descendentes y de grosor constante en todos los niveles.");
   G("Cada jefe conecta a sus subordinados con una sola línea.");
@@ -996,12 +1098,18 @@ function renderNode(){
       <option value="R"${n.lado==="R"?" selected":""}>Derecha</option></select></div>` }
     <div class="f"><label>Depende de</label><select id="fJefe"${n.parent?"":" disabled"}>${
       n.parent ? jefes : `<option>— órgano máximo —</option>` }</select></div>
+    ${ (t.arbol && n.parent) ? `<div class="f"><label>Altura (banda)</label><select id="fBanda">${
+      opcionesBanda(n, p)
+    }</select></div>` : "" }
     ${ (t.arbol && n.parent) ? `<div class="f"><label>Escalonado</label><select id="fDes">${
       [["0","Alineado con sus pares"],["1","1 paso abajo"],["2","2 pasos abajo"],["3","3 pasos"],["4","4 pasos"]]
       .map(o => `<option value="${o[0]}"${desnivelDe(sel)===+o[0]?" selected":""}>${o[1]}</option>`).join("")
     }</select></div>` : "" }
     <div class="f"><label>Color de esta caja</label><input type="color" id="fColor" value="${n.color || S.cfg.colFondo}"></div>
     ${ n.color ? `<div class="btnrow"><button class="b" id="btNoColor">Quitar color propio</button></div>` : "" }
+    <div class="f"><label>Color del área</label><input type="color" id="fArea" value="${n.areaColor || colorDe(sel) || S.cfg.colFondo}"></div>
+    ${ n.areaColor ? `<div class="btnrow"><button class="b" id="btNoArea">Quitar el área</button></div>`
+      : (areaDe(sel) ? `<p class="hint" style="margin:0 0 6px">Hereda el color del área <b>${esc(areaDe(sel).titulo)}</b>.</p>` : "") }
     <div class="f wide"><label>Funciones (una por línea)</label><textarea id="fFun" rows="3">${esc((n.funciones||[]).join("\n"))}</textarea></div>
     <div class="btnrow">
       <button class="b" id="btUp" title="Mover antes entre hermanas">&#9664;</button>
@@ -1033,6 +1141,14 @@ function renderNode(){
   };
   if($("#fLado")) $("#fLado").onchange = e => { snap(); n.lado = e.target.value; refresh(); };
   if($("#fDes")) $("#fDes").onchange = e => { snap(); n.desnivel = +e.target.value; refresh(); };
+  if($("#fBanda")) $("#fBanda").onchange = e => {
+    snap();
+    n.nivelVisual = e.target.value === "" ? null : +e.target.value;
+    refresh();
+    if(n.nivelVisual !== null && !S.cfg.verBandas) status("Conviene rotular las bandas: actívalas en Presentación");
+  };
+  $("#fArea").oninput = e => { n.areaColor = e.target.value; autosave(); renderCanvas(); renderAudit(); };
+  if($("#btNoArea")) $("#btNoArea").onclick = () => { snap(); n.areaColor = ""; refresh(); };
   if($("#fJefe") && n.parent) $("#fJefe").onchange = e => { snap(); n.parent = e.target.value; normalizarOrden(n.parent); refresh(); };
   $("#fColor").oninput = e => { n.color = e.target.value; autosave(); renderCanvas(); renderAudit(); };
   if($("#btNoColor")) $("#btNoColor").onclick = () => { snap(); n.color = ""; refresh(); };
@@ -1040,6 +1156,16 @@ function renderNode(){
   $("#btDown").onclick = () => mover(1);
   $("#btDup").onclick = duplicar;
   $("#btDel").onclick = borrar;
+}
+function opcionesBanda(n, p){
+  const c = S.cfg;
+  const bj = (P[n.parent] && P[n.parent].b != null) ? P[n.parent].b : 0;
+  const maxB = Math.max.apply(null, Object.values(P).map(q => q.b || 0)) + 2;
+  const nom = i => (c.bandas[i] || "").trim() ? " — " + (c.bandas[i] || "").trim() : "";
+  let h = `<option value=""${n.nivelVisual==null?" selected":""}>La que le toca (nivel ${(p.d||0)+1})</option>`;
+  for(let i = bj + 1; i <= maxB; i++)
+    h += `<option value="${i}"${n.nivelVisual===i?" selected":""}>Nivel ${i+1}${esc(nom(i))}</option>`;
+  return h;
 }
 function renderMeta(){
   const m = S.meta;
@@ -1080,7 +1206,9 @@ function renderPres(){
     <div class="f"><label>Tamaño de letra</label><input type="number" id="pFS" min="8" max="20" step=".5" value="${c.fs}"></div>
     <div class="f chk"><input type="checkbox" id="pTitular"${c.verTitular?" checked":""}><label>Mostrar titular / cargo</label></div>
     <div class="f chk"><input type="checkbox" id="pFun"${c.verFunciones?" checked":""}><label>Mostrar funciones (organigrama funcional)</label></div>
-    <div class="f chk"><input type="checkbox" id="pTint"${c.tintarStaff?" checked":""}><label>Tono distinto en asesorías</label></div>`;
+    <div class="f chk"><input type="checkbox" id="pTint"${c.tintarStaff?" checked":""}><label>Tono distinto en asesorías</label></div>
+    <div class="f chk"><input type="checkbox" id="pBan"${c.verBandas?" checked":""}><label>Rotular las bandas de nivel</label></div>
+    ${ c.verBandas ? bandasEditor() : "" }`;
   const bind = (id, fn) => { const e = $(id); e.oninput = e.onchange = () => {
     fn(e.type==="checkbox" ? e.checked : num(e.value, 0) || e.value); autosave(); renderCanvas(); renderAudit(); }; };
   bind("#pModo", v => c.modo = v);
@@ -1090,6 +1218,19 @@ function renderPres(){
   bind("#pFS", v => { c.fs = v; c.fsc = Math.max(8, v - 2); });
   bind("#pTitular", v => c.verTitular = v); bind("#pFun", v => c.verFunciones = v);
   bind("#pTint", v => c.tintarStaff = v);
+  $("#pBan").onchange = e => { c.verBandas = e.target.checked; refresh(); };
+  document.querySelectorAll("[data-banda]").forEach(inp => inp.oninput = () => {
+    c.bandas[+inp.dataset.banda] = inp.value; autosave(); renderCanvas(); renderNode(); renderAudit();
+  });
+}
+function bandasEditor(){
+  const c = S.cfg;
+  const maxB = Math.max.apply(null, Object.values(P).map(q => q.b || 0));
+  let h = `<div style="margin:2px 0 4px">`;
+  for(let i = 0; i <= maxB; i++)
+    h += `<div class="f"><label>Nivel ${i+1}</label><input data-banda="${i}" value="${esc(c.bandas[i]||"")}" placeholder="sin rótulo"></div>`;
+  return h + `</div><p class="hint">Nombra las bandas por rango del puesto (Gerencia, Jefatura, Coordinación…).
+    Es lo que permite alinear una caja a la altura de su rango sin que se lea como dependencia.</p>`;
 }
 const PALETAS = {
   Institucional: { colFondo:"#ffffff", colBorde:"#1f4e79", colTexto:"#12293d", colMando:"#1f4e79", colLienzo:"#ffffff",
@@ -1166,16 +1307,18 @@ function renderPlaza(){
 }
 function exportCSV(){
   layout();
-  const L = [["Nivel","Unidad","Tipo","Depende de","Categoria de cargo","Personas","Total del area","Titular"].join(";")];
+  const L = [["Nivel","Banda visual","Area","Unidad","Tipo","Depende de","Categoria de cargo","Personas","Total del area","Titular"].join(";")];
   const q = t => `"${String(t==null?"":t).replace(/"/g,'""')}"`;
   const ordenados = Object.keys(S.nodes).sort((a,b) => (P[a].d - P[b].d) || (P[a].x - P[b].x));
   ordenados.forEach(id => {
     const n = S.nodes[id];
-    L.push([ P[id].d + 1, q(n.titulo), q(TIPOS[n.tipo].nom),
+    const ar = areaDe(id);
+    L.push([ P[id].d + 1, q((S.cfg.bandas[P[id].b] || "").trim() || ("Nivel " + ((P[id].b||0)+1))),
+      q(ar ? ar.titulo : ""), q(n.titulo), q(TIPOS[n.tipo].nom),
       q(n.parent ? (S.nodes[n.parent]||{}).titulo : "—"), q(n.categoria || ""),
       tienePlazas(n) ? plazasProp(n) : "", totalArea(id), q(n.titular || "") ].join(";"));
   });
-  L.push(["", q("TOTAL"), "", "", "", totalGeneral(), "", ""].join(";"));
+  L.push(["", "", "", q("TOTAL"), "", "", "", totalGeneral(), "", ""].join(";"));
   bajar(slug() + "-padron.csv", new Blob(["﻿" + L.join("\r\n")], { type:"text/csv;charset=utf-8" }));
   status("Padrón exportado en CSV");
 }
@@ -1310,8 +1453,14 @@ function exportSVG(){
   status("SVG vectorial exportado");
 }
 function exportPNG(){
-  const escala = +$("#selDpi").value;
+  const pedida = +$("#selDpi").value;
   const r = svgString();
+  /* los navegadores no dibujan canvas de más de ~16.384 px por lado ni de área
+     ilimitada: si la escala pedida se pasa, se baja sola y se avisa */
+  const LADO = 16000, AREA = 180e6;
+  const tope = Math.min(LADO/r.w, LADO/r.h, Math.sqrt(AREA/(r.w*r.h)));
+  const escala = Math.max(1, Math.min(pedida, Math.floor(tope*10)/10));
+  if(escala < pedida) status(`Organigrama muy grande: PNG a ${escala}x en vez de ${pedida}x (usa SVG o PDF para calidad total)`);
   const img = new Image();
   img.onload = () => {
     const cv = document.createElement("canvas");
@@ -1319,7 +1468,11 @@ function exportPNG(){
     const ctx = cv.getContext("2d");
     ctx.fillStyle = S.cfg.colLienzo; ctx.fillRect(0, 0, cv.width, cv.height);
     ctx.drawImage(img, 0, 0, cv.width, cv.height);
-    cv.toBlob(b => { bajar(slug() + "-" + escala + "x.png", b); status(`PNG exportado ${cv.width}×${cv.height} px`); });
+    cv.toBlob(b => {
+      if(!b){ status("El PNG salió demasiado grande para el navegador: exporta en SVG o PDF"); return; }
+      bajar(slug() + "-" + escala + "x.png", b);
+      status(`PNG exportado ${cv.width}×${cv.height} px a ${escala}x`);
+    });
   };
   img.onerror = () => status("No se pudo generar el PNG");
   img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(r.svg);
