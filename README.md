@@ -62,6 +62,31 @@ que se ve y lo que se edita; con el botón **+** se agrega el año siguiente.
   propuesto. El auditor te avisa si el título no lo dice.
 - Los archivos exportados llevan el año en el nombre (`...-2027.png`).
 
+### Reorganizaciones: cambiar de jefe solo en un año
+
+El organigrama grafica **cargos, no personas**. Que quien hoy es jefe pase a un puesto menor no es
+"un cargo que baja": es un cargo que termina y otro que nace. Con eso, una reorganización son
+cuatro movimientos, y los cuatro se declaran en el mismo archivo:
+
+| Movimiento | Cómo |
+|---|---|
+| El cargo de jefe desaparece | *Existe hasta* el año anterior |
+| Entra un jefe nuevo | Cargo nuevo con *Existe desde* ese año |
+| Aparece el puesto menor | Cargo nuevo bajo el jefe nuevo |
+| Los subordinados pasan al jefe nuevo | **Reasignación por año** |
+
+La reasignación se hace con el año activo puesto en el año del cambio: eliges el nuevo jefe en
+**Depende de**, o arrastras la caja sobre él. Se guarda solo para ese año en adelante — el año base
+queda intacto. En el año base, el mismo control cambia la dependencia de todos los años.
+
+El panel lista las reasignaciones de la unidad (`2027 → Jefe de Rendimiento`) y permite anularlas.
+En el dibujo, **la línea de mando sale del color del resalte** cuando el cargo cambia de dependencia
+ese año, y el cuadro de crecimiento cuenta los cargos reasignados aparte de las altas y las bajas.
+
+Así la reorganización no infla el conteo: un jefe nuevo más un médico nuevo son **2 cargos nuevos**,
+no ocho, porque los subordinados no se duplican. Y el aviso de arrastre de bajas desaparece solo en
+cuanto reasignas los cargos que se mantienen.
+
 ### Cómo se resalta el crecimiento
 
 Respecto del año anterior, en el año que estás viendo:
@@ -71,7 +96,7 @@ Respecto del año anterior, en el año que estás viendo:
   son todas; en uno existente, solo el aumento.
 - **Sello `-n`** atenuado = plazas que se reducen.
 - **Cuadro de crecimiento** dentro del gráfico: cargos nuevos y sus plazas, ampliación de cargos
-  existentes, reducciones y bajas, más el total del año.
+  existentes, reducciones, bajas, cargos reasignados y el total del año.
 - El color del resalte se cambia en el panel Plantilla; todo el resalte se apaga con un interruptor.
 - El **CSV trae una columna de personas por año**, más *Existe desde* y *Baja en*: ese es el archivo
   para presupuestar el crecimiento en Excel.
@@ -207,7 +232,7 @@ Para el PDF: botón **PDF** y en el diálogo del navegador elegir "Guardar como 
   cfg{modo,w,h,gapH,gapN,gapS,g,fs,colores...},
   cfg{... verBandas, bandas[], pasoDesnivel, anios[], anio, verCrecimiento, colNuevoBorde},
   nodes{ id:{id,parent,tipo,titulo,titular,funciones[],lado,ord,color,areaColor,
-             personas,categoria,desnivel,nivelVisual,desde,hasta,plazasAnio{}} },
+             personas,categoria,desnivel,nivelVisual,desde,hasta,plazasAnio{},parentAnio{}} },
   rel[{a,b,tipo}], view{x,y,z} }
 ```
 

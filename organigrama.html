@@ -351,7 +351,7 @@ const RELS = {
 function nodo(id, parent, tipo, titulo, ord){
   return { id, parent, tipo, titulo, titular:"", funciones:[], lado:"L", ord:ord||0, color:"",
            personas:null, categoria:"", desnivel:0, nivelVisual:null, areaColor:"",
-           desde:null, hasta:null, plazasAnio:{} };
+           desde:null, hasta:null, plazasAnio:{}, parentAnio:{} };
 }
 /* ============================ AÑOS DEL PLAN ==============================
    Un solo archivo guarda la estructura de todos los años. Cada unidad declara
@@ -365,13 +365,32 @@ function anioPrev(y){
   const a = aniosOrd(), i = a.indexOf(+(y == null ? anioAct() : y));
   return i > 0 ? a[i-1] : null;
 }
-/* ¿la unidad y todos sus jefes existen en ese año? */
+/* De quién depende la unidad en ese año. Una reorganización se declara como
+   una reasignación con año: el cargo no nace ni muere, solo cambia de jefe. */
+function padreEn(id, y){
+  const n = S.nodes[id];
+  if(!n) return null;
+  let p = n.parent, pa = -Infinity;
+  const m = n.parentAnio || {};
+  Object.keys(m).forEach(k => {
+    const a = +k;
+    if(a <= y && a >= pa && m[k] && S.nodes[m[k]]){ p = m[k]; pa = a; }
+  });
+  return p === id ? n.parent : p;
+}
+const reasignadaEn = (n, y) => { y = (y == null ? anioAct() : y);
+  return !!(n.parentAnio && n.parentAnio[String(y)] && S.nodes[n.parentAnio[String(y)]] && y > anioBase()); };
+const aniosReasignada = n => Object.keys(n.parentAnio || {}).map(Number).sort((a,b)=>a-b)
+  .filter(a => n.parentAnio[String(a)] && S.nodes[n.parentAnio[String(a)]]);
+/* ¿la unidad y todos sus jefes de ese año existen? */
 function visibleEn(id, y){
-  let n = S.nodes[id], g = 0;
-  while(n && g++ < 90){
+  let cur = id, g = 0;
+  while(cur && g++ < 90){
+    const n = S.nodes[cur];
+    if(!n) return false;
     if(n.desde != null && n.desde !== "" && y < +n.desde) return false;
     if(n.hasta != null && n.hasta !== "" && y > +n.hasta) return false;
-    n = n.parent ? S.nodes[n.parent] : null;
+    cur = padreEn(cur, y);
   }
   return true;
 }
@@ -419,13 +438,14 @@ const totalGeneral = () => { const y = anioAct();
 function crecimiento(y){
   y = (y == null ? anioAct() : y);
   const p = anioPrev(y);
-  const r = { prev:p, nuevas:0, plazasNuevas:0, ampliadas:0, reducidas:0, bajas:0, total:totalGeneral() };
+  const r = { prev:p, nuevas:0, plazasNuevas:0, ampliadas:0, reducidas:0, bajas:0, reasignadas:0, total:totalGeneral() };
   if(p == null) return r;
   Object.values(S.nodes).forEach(n => {
     const hoy = visibleEn(n.id, y), antes = visibleEn(n.id, p);
     if(hoy && !antes){ r.nuevas++; r.plazasNuevas += plazasProp(n); return; }
     if(!hoy && antes){ r.bajas++; return; }
     if(!hoy) return;
+    if(reasignadaEn(n, y)) r.reasignadas++;
     const d = deltaEn(n, y);
     if(d > 0) r.ampliadas += d; else if(d < 0) r.reducidas += -d;
   });
@@ -433,19 +453,18 @@ function crecimiento(y){
 }
 /* color de área: se hereda del ancestro más cercano que lo tenga declarado */
 function colorDe(id){
-  let n = S.nodes[id], g = 0;
-  if(n && n.color) return n.color;
-  while(n && g++ < 80){
-    if(n.areaColor) return n.areaColor;
-    n = n.parent ? S.nodes[n.parent] : null;
-  }
-  return null;
+  if(S.nodes[id] && S.nodes[id].color) return S.nodes[id].color;
+  const a = areaDe(id);
+  return a ? a.areaColor : null;
 }
 function areaDe(id){
-  let n = S.nodes[id], g = 0;
-  while(n && g++ < 80){
+  let cur = id, g = 0;
+  const y = anioAct();
+  while(cur && g++ < 80){
+    const n = S.nodes[cur];
+    if(!n) break;
     if(n.areaColor) return n;
-    n = n.parent ? S.nodes[n.parent] : null;
+    cur = padreEn(cur, y);
   }
   return null;
 }
@@ -492,7 +511,22 @@ let undoStack = [], redoStack = [], saveTimer = null;
 const LS_KEY = "org-studio-v1", LS_THEME = "org-studio-theme";
 
 function kidsAll(id){
-  return Object.values(S.nodes).filter(n => n.parent === id).sort((a,b) => (a.ord-b.ord) || a.id.localeCompare(b.id));
+  const y = anioAct();
+  return Object.values(S.nodes).filter(n => padreEn(n.id, y) === id)
+    .sort((a,b) => (a.ord-b.ord) || a.id.localeCompare(b.id));
+}
+/* hijos en cualquier año: para borrar sin dejar unidades huérfanas */
+function hijosTodoAnio(id){
+  return Object.values(S.nodes).filter(n => n.parent === id
+    || Object.keys(n.parentAnio || {}).some(k => n.parentAnio[k] === id));
+}
+function descendientesTodos(id, acc, vis){
+  acc = acc || []; vis = vis || {};
+  hijosTodoAnio(id).forEach(k => {
+    if(vis[k.id]) return;
+    vis[k.id] = 1; acc.push(k.id); descendientesTodos(k.id, acc, vis);
+  });
+  return acc;
 }
 /* las que se dibujan: solo las que existen en el año activo */
 const kidsTree = id => kidsAll(id).filter(n => TIPOS[n.tipo].arbol && visibleEn(n.id, anioAct()));
@@ -599,6 +633,7 @@ function layout(){
   /* 1. profundidad de cada unidad del árbol */
   const prof = {};
   (function walk(id, d){
+    if(prof[id] != null || d > 40) return;      /* corta ciclos por reasignación */
     prof[id] = d;
     kidsTree(id).forEach(k => walk(k.id, d+1));
   })(S.root, 0);
@@ -635,7 +670,10 @@ function layout(){
     pos[id] += dx;
     kidsTree(id).forEach(k => shift(k.id, dx));
   }
+  const puesto = {};
   function place(id, start){
+    if(puesto[id]) return { center: start + A/2, end: start + A };
+    puesto[id] = 1;
     const s = kidsSide(id);
     const nL = s.filter(x => x.lado === "L").length;
     const resL = nL ? (A + gapS) : 0;
@@ -672,6 +710,7 @@ function layout(){
      Nunca puede quedar por encima de su jefe: se fuerza al menos una banda abajo. */
   const banda = {}, depthPos = {};
   (function walk(id, dB, bandaJefe){
+    if(banda[id] != null || prof[id] == null) return;
     let b = prof[id] + dB;
     const nv = S.nodes[id].nivelVisual;
     if(nv !== null && nv !== undefined && nv !== ""){
@@ -739,7 +778,7 @@ function layout(){
     const ars = areasDeclaradas();
     const crec = c.verCrecimiento && anioPrev() != null;
     if(usados.length || ars.length) LEY = { x: b.x, y: b.y2 + 34, w: 258,
-      h: 26 + usados.length*17 + (nota ? 30 : 0) + (crec ? 34 : 0) + (ars.length ? 22 + ars.length*15 : 0),
+      h: 26 + usados.length*17 + (nota ? 30 : 0) + (crec ? 50 : 0) + (ars.length ? 22 + ars.length*15 : 0),
       rels: usados, nota: nota, areas: ars, crec: crec };
   }
 }
@@ -757,7 +796,9 @@ function resumenFilas(){
     if(g.ampliadas) fila("Ampliación de cargos existentes", g.ampliadas);
     if(g.reducidas) F.push({ t:"r", k:"Reducción de plazas", v:"-" + g.reducidas, p:"" });
     if(g.bajas) F.push({ t:"r", k:g.bajas + " cargo(s) dado(s) de baja", v:"", p:"" });
-    if(!g.nuevas && !g.ampliadas && !g.reducidas && !g.bajas) F.push({ t:"r", k:"Sin cambios frente a " + g.prev, v:"", p:"" });
+    if(g.reasignadas) F.push({ t:"r", k:g.reasignadas + " cargo(s) cambian de dependencia", v:"", p:"" });
+    if(!g.nuevas && !g.ampliadas && !g.reducidas && !g.bajas && !g.reasignadas)
+      F.push({ t:"r", k:"Sin cambios frente a " + g.prev, v:"", p:"" });
   }
   if(c.resumenPor !== "categoria"){
     F.push({ t:"h", k:"POR ÁREA (NIVEL " + (c.resumenNivel+1) + ")" });
@@ -812,11 +853,17 @@ function relsUsadas(){
 }
 
 /* ================================ DIBUJO ================================= */
-function trazo(rel){
+function trazo(rel, nuevo){
   const r = RELS[rel], g = S.cfg.g;
-  const w = Math.max(.8, +(g * r.w).toFixed(2));
+  const w = Math.max(.8, +(g * r.w * (nuevo ? 1.25 : 1)).toFixed(2));
   const dash = r.dash ? ` stroke-dasharray="${r.dash}"` : "";
-  return ` stroke="${S.cfg.colMando}" stroke-width="${w}" fill="none" stroke-linecap="butt"${dash}`;
+  const col = nuevo ? S.cfg.colNuevoBorde : S.cfg.colMando;
+  return ` stroke="${col}" stroke-width="${w}" fill="none" stroke-linecap="butt"${dash}`;
+}
+/* ¿la unión con su jefe es nueva este año? (cargo nuevo o reasignado) */
+function unionNueva(n){
+  if(!S.cfg.verCrecimiento || anioPrev() == null) return false;
+  return esNueva(n) || reasignadaEn(n);
 }
 function lineasSVG(){
   const c = S.cfg, vert = c.modo === "vertical";
@@ -838,7 +885,7 @@ function lineasSVG(){
     if(soloUno && Math.abs((vert ? pts[0].x - ex : pts[0].y - ey)) < .5){
       /* un solo subordinado alineado: una sola línea recta, sin flecha */
       const q = pts[0];
-      out += `<path d="M${ex} ${ey} L${q.x} ${q.y}"${trazo(TIPOS[kids[0].tipo].rel)}/>`;
+      out += `<path d="M${ex} ${ey} L${q.x} ${q.y}"${trazo(TIPOS[kids[0].tipo].rel, unionNueva(kids[0]))}/>`;
     } else {
       out += vert ? `<path d="M${ex} ${ey} V${bus}"${trazo(relTronco)}/>`
                   : `<path d="M${ex} ${ey} H${bus}"${trazo(relTronco)}/>`;
@@ -847,9 +894,9 @@ function lineasSVG(){
       out += vert ? `<path d="M${a} ${bus} H${z}"${trazo(relTronco)}/>`
                   : `<path d="M${bus} ${a} V${z}"${trazo(relTronco)}/>`;
       kids.forEach((k,i) => {
-        const q = pts[i], r = TIPOS[k.tipo].rel;
-        out += vert ? `<path d="M${q.x} ${bus} L${q.x} ${q.y}"${trazo(r)}/>`
-                    : `<path d="M${bus} ${q.y} L${q.x} ${q.y}"${trazo(r)}/>`;
+        const q = pts[i], r = TIPOS[k.tipo].rel, nv = unionNueva(k);
+        out += vert ? `<path d="M${q.x} ${bus} L${q.x} ${q.y}"${trazo(r, nv)}/>`
+                    : `<path d="M${bus} ${q.y} L${q.x} ${q.y}"${trazo(r, nv)}/>`;
       });
     }
   });
@@ -874,7 +921,7 @@ function lineasSVG(){
       d = `M${mx} ${ay} L${mx} ${by}`;
       if(!conHijos && Math.abs(mx - (j.x + j.w/2)) > 1) d = `M${j.x+j.w/2} ${ay} L${mx} ${ay} L${mx} ${by}`;
     }
-    out += `<path d="${d}"${trazo(rel)}/>`;
+    out += `<path d="${d}"${trazo(rel, unionNueva(n))}/>`;
   });
   /* --- relaciones de coordinación --- */
   S.rel.forEach(r => {
@@ -1009,10 +1056,12 @@ function cajetinSVG(){
       out += selloSVG(LEY.x+8, y-8, "+n", "nv")
            + `<text class="cv2" x="${LEY.x+60}" y="${y+3.5}">Personas que se suman en ${anioAct()}</text>`
            + `<rect x="${LEY.x+8}" y="${y+8}" width="44" height="12" rx="2" fill="none" stroke="${S.cfg.colNuevoBorde}" stroke-width="2.4"/>`
-           + `<text class="cv2" x="${LEY.x+60}" y="${y+18.5}">Cargo nuevo en ${anioAct()}</text>`;
+           + `<text class="cv2" x="${LEY.x+60}" y="${y+18.5}">Cargo nuevo en ${anioAct()}</text>`
+           + `<path d="M${LEY.x+8} ${y+30} H${LEY.x+52}"${trazo("mando", true)}/>`
+           + `<text class="cv2" x="${LEY.x+60}" y="${y+33.5}">Cambia de dependencia en ${anioAct()}</text>`;
     }
     if(LEY.areas && LEY.areas.length){
-      let y = LEY.y + 30 + LEY.rels.length*17 + (LEY.nota ? 30 : 0) + (LEY.crec ? 34 : 0) + 8;
+      let y = LEY.y + 30 + LEY.rels.length*17 + (LEY.nota ? 30 : 0) + (LEY.crec ? 50 : 0) + 8;
       out += `<text class="ck" x="${LEY.x+8}" y="${y}">ÁREAS</text>`;
       LEY.areas.forEach((n,i) => {
         const yy = y + 15 + i*15;
@@ -1155,14 +1204,19 @@ function auditar(){
       W(`Estás viendo <b>${anioAct()}</b>, que es estructura proyectada, no aprobada. La doctrina distingue el
         organigrama real del <b>propuesto</b>: pon "propuesta ${anioAct()}" en el título o el subtítulo antes de
         entregarlo. El cajetín ya lo marca como PROPUESTA.`);
-    const arrastre = nodos.filter(n => n.hasta && descendientes(n.id).some(x => !S.nodes[x].hasta));
-    if(arrastre.length) W(`Al dar de baja ${arrastre.slice(0,2).map(n => esc(n.titulo) + " (" + n.hasta + ")").join(", ")},
-      sus dependencias también desaparecen del organigrama. Si esos cargos se mantienen, reasígnalos a otro jefe;
-      si desaparecen con él, ponles su propio año de término para que quede explícito.`);
-    const huerfanas = nodos.filter(n => n.parent && visibleEn(n.parent, anioAct()) === false
-      && (n.desde == null || +n.desde <= anioAct()));
-    if(huerfanas.length) E(`${huerfanas.length} unidad(es) previstas para este año dependen de una unidad que todavía
-      no existe (${huerfanas.slice(0,3).map(n => esc(n.titulo)).join(", ")}): no se dibujan. Ajusta el año de su jefe.`);
+    const arrastre = nodos.filter(n => n.hasta && hijosTodoAnio(n.id).some(x =>
+      !x.hasta && !reasignadaEn(x, +n.hasta + 1) && padreEn(x.id, +n.hasta + 1) === n.id));
+    if(arrastre.length) W(`Al terminar ${arrastre.slice(0,2).map(n => esc(n.titulo) + " (" + n.hasta + ")").join(", ")},
+      sus dependencias desaparecen con ella. Si esos cargos se mantienen, <b>reasígnalos</b> al jefe que los recibe
+      en ${aniosOrd().filter(a => a > anioBase())[0] || ""} y siguientes; si desaparecen con ella, ponles su propio año
+      de término para que quede explícito.`);
+    const huerfanas = nodos.filter(n => {
+      const p = padreEn(n.id, anioAct());
+      return n.parent && p && !visibleEn(p, anioAct())
+        && (n.desde == null || +n.desde <= anioAct()) && (n.hasta == null || +n.hasta >= anioAct());
+    });
+    if(huerfanas.length) E(`${huerfanas.length} unidad(es) de este año dependen de una unidad que no existe en ${anioAct()}
+      (${huerfanas.slice(0,3).map(n => esc(n.titulo)).join(", ")}): no se dibujan. Reasígnalas al jefe que sí existe ese año.`);
   }
   const realineadas = nodos.filter(n => n.nivelVisual !== null && n.nivelVisual !== undefined && n.nivelVisual !== "");
   if(realineadas.length){
@@ -1213,9 +1267,11 @@ function renderNode(){
     return;
   }
   const n = S.nodes[sel], t = TIPOS[n.tipo], p = P[sel] || { d:0 };
+  const padreHoy = padreEn(sel, anioAct());
   const jefes = Object.values(S.nodes)
     .filter(x => x.id !== sel && descendientes(sel).indexOf(x.id) < 0)
-    .map(x => `<option value="${x.id}"${x.id===n.parent?" selected":""}>${esc(x.titulo||"(sin nombre)")}</option>`).join("");
+    .map(x => `<option value="${x.id}"${x.id===padreHoy?" selected":""}>${esc(x.titulo||"(sin nombre)")}</option>`).join("");
+  const reas = aniosReasignada(n);
   box.innerHTML = `<div id="ndTitle"><span>Unidad</span><em>nivel ${p.d+1}</em></div>
     <div class="f wide"><label>Nombre de la unidad</label><input id="fTit" value="${esc(n.titulo)}"></div>
     <div class="f wide"><label>Titular o cargo (opcional)</label><input id="fTitular" value="${esc(n.titular)}"></div>
@@ -1248,8 +1304,12 @@ function renderNode(){
     ${ t.arbol ? "" : `<div class="f"><label>Lado</label><select id="fLado">
       <option value="L"${n.lado==="L"?" selected":""}>Izquierda</option>
       <option value="R"${n.lado==="R"?" selected":""}>Derecha</option></select></div>` }
-    <div class="f"><label>Depende de</label><select id="fJefe"${n.parent?"":" disabled"}>${
+    <div class="f"><label>Depende de ${aniosOrd().length > 1 ? "en <b>"+anioAct()+"</b>" : ""}</label>
+      <select id="fJefe"${n.parent?"":" disabled"}>${
       n.parent ? jefes : `<option>— órgano máximo —</option>` }</select></div>
+    ${ reas.length ? `<p class="hint" style="margin:0 0 6px">Reasignaciones: ${reas.map(a =>
+        `<b>${a}</b> → ${esc((S.nodes[n.parentAnio[String(a)]]||{}).titulo || "?")}`).join(" · ")}
+      ${ reas.indexOf(anioAct()) >= 0 ? `<button class="b" id="btNoReas" style="margin-top:4px;padding:2px 6px">Anular la reasignación de ${anioAct()}</button>` : "" }</p>` : "" }
     ${ (t.arbol && n.parent) ? `<div class="f"><label>Altura (banda)</label><select id="fBanda">${
       opcionesBanda(n, p)
     }</select></div>` : "" }
@@ -1303,7 +1363,10 @@ function renderNode(){
   };
   $("#fArea").oninput = e => { n.areaColor = e.target.value; autosave(); renderCanvas(); renderAudit(); };
   if($("#btNoArea")) $("#btNoArea").onclick = () => { snap(); n.areaColor = ""; refresh(); };
-  if($("#fJefe") && n.parent) $("#fJefe").onchange = e => { snap(); n.parent = e.target.value; normalizarOrden(n.parent); refresh(); };
+  if($("#fJefe") && n.parent) $("#fJefe").onchange = e => reasignar(sel, e.target.value);
+  if($("#btNoReas")) $("#btNoReas").onclick = () => {
+    snap(); delete n.parentAnio[String(anioAct())]; refresh(); status("Reasignación anulada");
+  };
   $("#fColor").oninput = e => { n.color = e.target.value; autosave(); renderCanvas(); renderAudit(); };
   if($("#btNoColor")) $("#btNoColor").onclick = () => { snap(); n.color = ""; refresh(); };
   $("#btUp").onclick = () => mover(-1);
@@ -1505,10 +1568,11 @@ function exportCSV(){
   layout();
   const A = aniosOrd();
   const q = t => `"${String(t==null?"":t).replace(/"/g,'""')}"`;
-  const L = [["Nivel","Banda visual","Area","Unidad","Tipo","Depende de","Categoria de cargo",
-    "Existe desde","Baja en"].concat(A.map(a => "Personas " + a)).concat(["Total del area " + anioAct(),"Titular"]).join(";")];
+  const L = [["Nivel","Banda visual","Area","Unidad","Tipo","Depende de (" + anioAct() + ")","Reasignaciones","Categoria de cargo",
+    "Existe desde","Existe hasta"].concat(A.map(a => "Personas " + a)).concat(["Total del area " + anioAct(),"Titular"]).join(";")];
   const prof = {};
-  (function walk(id, d){ prof[id] = d; kidsAll(id).forEach(k => walk(k.id, d+1)); })(S.root, 0);
+  (function walk(id, d){ if(prof[id] != null || d > 40) return; prof[id] = d; kidsAll(id).forEach(k => walk(k.id, d+1)); })(S.root, 0);
+  Object.keys(S.nodes).forEach(id => { if(prof[id] == null) prof[id] = 0; });
   const ordenados = Object.keys(S.nodes).sort((a,b) =>
     (prof[a] - prof[b]) || ((P[a] ? P[a].x : 0) - (P[b] ? P[b].x : 0)));
   ordenados.forEach(id => {
@@ -1516,13 +1580,14 @@ function exportCSV(){
     L.push([ prof[id] + 1,
       q(p ? ((S.cfg.bandas[p.b] || "").trim() || ("Nivel " + ((p.b||0)+1))) : "no existe en " + anioAct()),
       q(ar ? ar.titulo : ""), q(n.titulo), q(TIPOS[n.tipo].nom),
-      q(n.parent ? (S.nodes[n.parent]||{}).titulo : "—"), q(n.categoria || ""),
-      n.desde || A[0], n.hasta || "" ]
+      q(n.parent ? (S.nodes[padreEn(id, anioAct())]||{}).titulo : "—"),
+      q(aniosReasignada(n).map(a => a + ": " + ((S.nodes[n.parentAnio[String(a)]]||{}).titulo||"")).join(" | ")),
+      q(n.categoria || ""), n.desde || A[0], n.hasta || "" ]
       .concat(A.map(a => visibleEn(id, a) ? (plazasEn(n, a) == null ? "" : plazasEn(n, a)) : ""))
       .concat([ p ? totalArea(id) : "", q(n.titular || "") ]).join(";"));
   });
   const tot = A.map(a => { const guarda = S.cfg.anio; S.cfg.anio = a; const t = totalGeneral(); S.cfg.anio = guarda; return t; });
-  L.push(["", "", "", q("TOTAL"), "", "", "", "", ""].concat(tot).concat(["", ""]).join(";"));
+  L.push(["", "", "", q("TOTAL"), "", "", "", "", "", ""].concat(tot).concat(["", ""]).join(";"));
   bajar(slug() + "-padron.csv", new Blob(["﻿" + L.join("\r\n")], { type:"text/csv;charset=utf-8" }));
   status("Padrón exportado en CSV con una columna por año");
 }
@@ -1599,11 +1664,15 @@ function duplicar(){
 }
 function borrar(){
   if(!sel || !S.nodes[sel] || !S.nodes[sel].parent) return;
-  const hijos = descendientes(sel);
-  if(hijos.length && !confirm(`Se eliminará "${S.nodes[sel].titulo}" y ${hijos.length} unidad(es) dependiente(s). ¿Continuar?`)) return;
+  const hijos = descendientesTodos(sel);   /* de cualquier año, para no dejar huérfanas */
+  if(hijos.length && !confirm(`Se eliminará "${S.nodes[sel].titulo}" y ${hijos.length} unidad(es) que dependen de ella en algún año. ¿Continuar?`)) return;
   snap();
   const p = S.nodes[sel].parent;
-  hijos.concat([sel]).forEach(id => { delete S.nodes[id]; });
+  const fuera = hijos.concat([sel]);
+  fuera.forEach(id => { delete S.nodes[id]; });
+  Object.values(S.nodes).forEach(n => {   /* limpia reasignaciones que apuntaban a lo borrado */
+    Object.keys(n.parentAnio || {}).forEach(k => { if(fuera.indexOf(n.parentAnio[k]) >= 0) delete n.parentAnio[k]; });
+  });
   S.rel = S.rel.filter(r => S.nodes[r.a] && S.nodes[r.b]);
   normalizarOrden(p);
   sel = p; refresh();
@@ -1620,16 +1689,26 @@ function mover(dir){
   refresh();
 }
 function reasignar(id, nuevoPadre){
-  if(id === nuevoPadre) return;
-  if(!S.nodes[id].parent) { status("El órgano máximo no puede depender de otra unidad"); return; }
+  const n = S.nodes[id];
+  if(!n || id === nuevoPadre || !S.nodes[nuevoPadre]) return;
+  if(!n.parent) { status("El órgano máximo no puede depender de otra unidad"); return; }
   if(descendientes(id).indexOf(nuevoPadre) >= 0) { status("No se puede colgar una unidad de su propia dependencia"); return; }
+  const y = anioAct(), viejo = padreEn(id, y);
+  if(viejo === nuevoPadre) return;
   snap();
-  const viejo = S.nodes[id].parent;
-  S.nodes[id].parent = nuevoPadre;
-  S.nodes[id].ord = kidsAll(nuevoPadre).length;
+  if(y === anioBase()){
+    n.parent = nuevoPadre;                       /* cambio estructural, todos los años */
+    Object.keys(n.parentAnio || {}).forEach(k => { if(n.parentAnio[k] === nuevoPadre) delete n.parentAnio[k]; });
+  } else {
+    if(!n.parentAnio) n.parentAnio = {};
+    n.parentAnio[String(y)] = nuevoPadre;        /* reorganización a partir de ese año */
+  }
+  n.ord = kidsAll(nuevoPadre).length;
   normalizarOrden(viejo); normalizarOrden(nuevoPadre);
   refresh();
-  status(`"${S.nodes[id].titulo}" ahora depende de "${S.nodes[nuevoPadre].titulo}"`);
+  status(y === anioBase()
+    ? `"${n.titulo}" ahora depende de "${S.nodes[nuevoPadre].titulo}"`
+    : `Desde ${y}, "${n.titulo}" pasa a depender de "${S.nodes[nuevoPadre].titulo}"`);
 }
 
 /* ============================ ARCHIVO Y EXPORTACIÓN ====================== */
