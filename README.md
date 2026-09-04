@@ -47,6 +47,41 @@ consigna el número de plazas de cada unidad.
 Los tres interruptores (sellos, acumulado, cuadro resumen) se apagan si el organigrama es solo
 estructural.
 
+## Años del plan: crecimiento en un solo archivo
+
+Un mismo archivo guarda la estructura de todos los años. El selector **Año** de la barra cambia lo
+que se ve y lo que se edita; con el botón **+** se agrega el año siguiente.
+
+- **Existe desde / Existe hasta** por unidad: las que todavía no existen no se dibujan en los años
+  anteriores, y las dadas de baja desaparecen del año siguiente al que declares.
+- **N.º de personas es por año**, con arrastre: declaras 2 en 2026 y 4 en 2027, y los años sin dato
+  heredan el último valor declarado. El panel muestra la serie completa de la unidad seleccionada.
+- Al agregar una unidad mientras ves 2027, nace con **desde 2027** sola.
+- El **cajetín** rotula el año y marca `PROPUESTA` en los años posteriores al base, porque un
+  organigrama futuro no es estructura aprobada: la doctrina distingue el organigrama real del
+  propuesto. El auditor te avisa si el título no lo dice.
+- Los archivos exportados llevan el año en el nombre (`...-2027.png`).
+
+### Cómo se resalta el crecimiento
+
+Respecto del año anterior, en el año que estás viendo:
+
+- **Borde grueso de color** = el cargo es nuevo ese año.
+- **Sello `+n`** del mismo color, arriba a la izquierda = personas que se suman. En un cargo nuevo
+  son todas; en uno existente, solo el aumento.
+- **Sello `-n`** atenuado = plazas que se reducen.
+- **Cuadro de crecimiento** dentro del gráfico: cargos nuevos y sus plazas, ampliación de cargos
+  existentes, reducciones y bajas, más el total del año.
+- El color del resalte se cambia en el panel Plantilla; todo el resalte se apaga con un interruptor.
+- El **CSV trae una columna de personas por año**, más *Existe desde* y *Baja en*: ese es el archivo
+  para presupuestar el crecimiento en Excel.
+
+Un archivo de un solo año se comporta como antes y no muestra nada de esto. Los `.org.json` que ya
+tengas se abren sin cambios: se leen como "todo existe desde el año base".
+
+> Cuidado con una trampa: al dar de baja un jefe, sus dependencias también dejan de aparecer. Si
+> esos cargos se mantienen, reasígnalos a otro jefe; el panel de la unidad y el auditor te lo avisan.
+
 ## Escalonado: bajar una caja respecto de sus pares
 
 Campo **Escalonado** en el panel de la unidad (0 a 4 pasos; el paso se ajusta en Presentación,
@@ -138,6 +173,9 @@ Criterios de **precisión, presentación, sencillez, uniformidad y vigencia**:
 - unidades sin n.º de personas y contenido del cajetín que no corresponde a las plazas consignadas;
 - unidades alineadas a otra banda sin que las bandas estén rotuladas;
 - áreas coloreadas con la simbología oculta;
+- año proyectado sin que el título diga que es una propuesta;
+- baja de un jefe que arrastra dependencias que no declararon su propio término;
+- unidades previstas para el año cuyo jefe todavía no existe;
 - unidades con el mismo nombre **bajo el mismo jefe** (que "Preparador Físico" se repita en varios
   equipos es correcto y no se reporta).
 
@@ -157,7 +195,7 @@ municipios de México). El botón **Normativa** de la barra superior tiene el de
 | PNG | pegar en Word, presentaciones, WhatsApp | escala 2x a 8x; el ejemplo a 3x sale en 5934×2541 px. En organigramas muy anchos la escala se baja sola: los navegadores no dibujan más de ~16.000 px por lado |
 | SVG | imprenta, seguir editando en Illustrator/Inkscape | vectorial, texto real |
 | PDF | anexo de un estatuto o manual | vía diálogo de impresión, vectorial; A4/A3/Carta, vertical o apaisado |
-| CSV | padrón de plazas en Excel | nivel, unidad, jefe, categoría, personas, total del área |
+| CSV | padrón de plazas en Excel | nivel, banda, área, unidad, jefe, categoría, vigencia y **una columna de personas por año** |
 | .org.json | archivo de trabajo | estructura completa, se vuelve a abrir y editar |
 
 Para el PDF: botón **PDF** y en el diálogo del navegador elegir "Guardar como PDF".
@@ -167,9 +205,9 @@ Para el PDF: botón **PDF** y en el diálogo del navegador elegir "Guardar como 
 ```
 { v, root, meta{titulo,subtitulo,unidad,fecha,aprobado,ambito,contenido},
   cfg{modo,w,h,gapH,gapN,gapS,g,fs,colores...},
-  cfg{... verBandas, bandas[], pasoDesnivel},
+  cfg{... verBandas, bandas[], pasoDesnivel, anios[], anio, verCrecimiento, colNuevoBorde},
   nodes{ id:{id,parent,tipo,titulo,titular,funciones[],lado,ord,color,areaColor,
-             personas,categoria,desnivel,nivelVisual} },
+             personas,categoria,desnivel,nivelVisual,desde,hasta,plazasAnio{}} },
   rel[{a,b,tipo}], view{x,y,z} }
 ```
 
@@ -196,6 +234,7 @@ Antes de entregar: poner `activo:true`, fijar `caduca`, y renombrar el archivo s
 - Foto o iniciales del titular en la caja.
 - Plazas ocupadas frente a vacantes (hoy es un solo número por unidad).
 - Generar los organigramas **específicos** por área a partir del general, en un clic.
+- Vista comparativa de dos años lado a lado en la misma hoja.
 
 ---
 

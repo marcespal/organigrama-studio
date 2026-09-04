@@ -177,6 +177,11 @@ button.danger:hover{background:#fdecec;border-color:var(--bad)}
       </select>
     </div>
     <div class="tb">
+      <span style="color:var(--ink-soft);font-size:11.5px">Año</span>
+      <select class="b" id="selAnio" title="Año que se está viendo y editando"></select>
+      <button class="b" id="btAnioMas" title="Agregar el año siguiente al plan">+</button>
+    </div>
+    <div class="tb">
       <button class="b" id="btUndo" title="Deshacer (Ctrl+Z)">&#8630;</button>
       <button class="b" id="btRedo" title="Rehacer (Ctrl+Y)">&#8631;</button>
     </div>
@@ -345,17 +350,87 @@ const RELS = {
 /* ================================ ESTADO ================================= */
 function nodo(id, parent, tipo, titulo, ord){
   return { id, parent, tipo, titulo, titular:"", funciones:[], lado:"L", ord:ord||0, color:"",
-           personas:null, categoria:"", desnivel:0, nivelVisual:null, areaColor:"" };
+           personas:null, categoria:"", desnivel:0, nivelVisual:null, areaColor:"",
+           desde:null, hasta:null, plazasAnio:{} };
 }
-/* ---- plazas ---- */
-const tienePlazas = n => !(n.personas === null || n.personas === undefined || n.personas === "");
-const plazasProp = n => tienePlazas(n) ? Math.max(0, Math.round(+n.personas) || 0) : 0;
+/* ============================ AÑOS DEL PLAN ==============================
+   Un solo archivo guarda la estructura de todos los años. Cada unidad declara
+   desde qué año existe (y hasta cuándo, si se da de baja) y cuántas plazas
+   tiene en cada año, con arrastre del último valor declarado.
+   ======================================================================== */
+const aniosOrd = () => (S.cfg.anios && S.cfg.anios.length ? S.cfg.anios.slice().sort((a,b)=>a-b) : [new Date().getFullYear()]);
+const anioBase = () => aniosOrd()[0];
+const anioAct = () => { const a = aniosOrd(); return a.indexOf(+S.cfg.anio) >= 0 ? +S.cfg.anio : a[0]; };
+function anioPrev(y){
+  const a = aniosOrd(), i = a.indexOf(+(y == null ? anioAct() : y));
+  return i > 0 ? a[i-1] : null;
+}
+/* ¿la unidad y todos sus jefes existen en ese año? */
+function visibleEn(id, y){
+  let n = S.nodes[id], g = 0;
+  while(n && g++ < 90){
+    if(n.desde != null && n.desde !== "" && y < +n.desde) return false;
+    if(n.hasta != null && n.hasta !== "" && y > +n.hasta) return false;
+    n = n.parent ? S.nodes[n.parent] : null;
+  }
+  return true;
+}
+/* plazas declaradas para ese año, o el último valor declarado antes */
+function plazasEn(n, y){
+  if(!n) return null;
+  const base = anioBase();
+  let val = null, va = -Infinity;
+  if(n.personas !== null && n.personas !== undefined && n.personas !== ""){ val = +n.personas; va = base; }
+  const m = n.plazasAnio || {};
+  Object.keys(m).forEach(k => {
+    const a = +k, v = m[k];
+    if(a <= y && a >= va && v !== "" && v !== null && v !== undefined){ val = +v; va = a; }
+  });
+  return val === null || !isFinite(val) ? null : Math.max(0, Math.round(val));
+}
+function fijarPlazas(n, y, v){
+  if(y === anioBase()){ n.personas = v; if(n.plazasAnio) delete n.plazasAnio[String(y)]; }
+  else {
+    if(!n.plazasAnio) n.plazasAnio = {};
+    if(v === null) delete n.plazasAnio[String(y)];
+    else n.plazasAnio[String(y)] = v;
+  }
+}
+const esNueva = (n, y) => n.desde != null && n.desde !== "" && +n.desde === (y == null ? anioAct() : y) && +n.desde > anioBase();
+function deltaEn(n, y){
+  y = (y == null ? anioAct() : y);
+  const p = anioPrev(y);
+  if(p == null || esNueva(n, y) || !visibleEn(n.id, p)) return null;
+  const a = plazasEn(n, p), b = plazasEn(n, y);
+  if(a === null || b === null) return null;
+  return b - a;
+}
+/* ---- plazas del año activo ---- */
+const tienePlazas = n => plazasEn(n, anioAct()) !== null;
+const plazasProp = n => plazasEn(n, anioAct()) || 0;
 function totalArea(id){
-  let t = plazasProp(S.nodes[id]);
-  descendientes(id).forEach(x => { if(S.nodes[x]) t += plazasProp(S.nodes[x]); });
+  const y = anioAct();
+  let t = visibleEn(id, y) ? plazasProp(S.nodes[id]) : 0;
+  descendientes(id).forEach(x => { if(S.nodes[x] && visibleEn(x, y)) t += plazasProp(S.nodes[x]); });
   return t;
 }
-const totalGeneral = () => Object.values(S.nodes).reduce((a,n) => a + plazasProp(n), 0);
+const totalGeneral = () => { const y = anioAct();
+  return Object.values(S.nodes).reduce((a,n) => a + (visibleEn(n.id, y) ? plazasProp(n) : 0), 0); };
+function crecimiento(y){
+  y = (y == null ? anioAct() : y);
+  const p = anioPrev(y);
+  const r = { prev:p, nuevas:0, plazasNuevas:0, ampliadas:0, reducidas:0, bajas:0, total:totalGeneral() };
+  if(p == null) return r;
+  Object.values(S.nodes).forEach(n => {
+    const hoy = visibleEn(n.id, y), antes = visibleEn(n.id, p);
+    if(hoy && !antes){ r.nuevas++; r.plazasNuevas += plazasProp(n); return; }
+    if(!hoy && antes){ r.bajas++; return; }
+    if(!hoy) return;
+    const d = deltaEn(n, y);
+    if(d > 0) r.ampliadas += d; else if(d < 0) r.reducidas += -d;
+  });
+  return r;
+}
 /* color de área: se hereda del ancestro más cercano que lo tenga declarado */
 function colorDe(id){
   let n = S.nodes[id], g = 0;
@@ -399,6 +474,8 @@ function blankState(){
           uniformidad:true, tintarStaff:false, verTitular:true, verFunciones:false,
           verCajetin:true, verLeyenda:true, tramoMax:7, nivelMax:5,
           verPlazas:true, verAcumulado:true, verResumen:true, resumenNivel:1, resumenPor:"ambos",
+          anios:[new Date().getFullYear()], anio:new Date().getFullYear(),
+          colNuevoBorde:"#c2410c", colNuevoFondo:"#ffedd5", verCrecimiento:true,
           pasoDesnivel:24, verBandas:false,
           bandas:["Gerencia","Jefatura","Coordinación","Analista","Asistente","Operativo","",""] },
     nodes:{ [r]: nodo(r, null, "linea", "Dirección General", 0) },
@@ -417,8 +494,9 @@ const LS_KEY = "org-studio-v1", LS_THEME = "org-studio-theme";
 function kidsAll(id){
   return Object.values(S.nodes).filter(n => n.parent === id).sort((a,b) => (a.ord-b.ord) || a.id.localeCompare(b.id));
 }
-const kidsTree = id => kidsAll(id).filter(n => TIPOS[n.tipo].arbol);
-const kidsSide = id => kidsAll(id).filter(n => !TIPOS[n.tipo].arbol);
+/* las que se dibujan: solo las que existen en el año activo */
+const kidsTree = id => kidsAll(id).filter(n => TIPOS[n.tipo].arbol && visibleEn(n.id, anioAct()));
+const kidsSide = id => kidsAll(id).filter(n => !TIPOS[n.tipo].arbol && visibleEn(n.id, anioAct()));
 function descendientes(id, acc){
   acc = acc || [];
   kidsAll(id).forEach(k => { acc.push(k.id); descendientes(k.id, acc); });
@@ -469,17 +547,32 @@ function wrapPx(txt, maxW, fs, bold){
 function anchoSello(t){ return t ? Math.max(22, anchoAprox(t, 9.5, true) + 10) : 0; }
 function sellos(n){
   const c = S.cfg;
-  if(!c.verPlazas) return { propio:"", acum:"", w:0 };
-  const propio = tienePlazas(n) ? String(plazasProp(n)) : "";
-  let acum = "";
-  if(c.verAcumulado && kidsAll(n.id).length){
-    const t = totalArea(n.id);
-    if(t > plazasProp(n)) acum = "Σ" + t;
+  const r = { propio:"", acum:"", izq:"", izqCls:"", wR:0, wL:0 };
+  if(c.verPlazas){
+    r.propio = tienePlazas(n) ? String(plazasProp(n)) : "";
+    if(c.verAcumulado && kidsTree(n.id).concat(kidsSide(n.id)).length){
+      const t = totalArea(n.id);
+      if(t > plazasProp(n)) r.acum = "Σ" + t;
+    }
   }
-  return { propio, acum, w: Math.max(anchoSello(propio), anchoSello(acum)) };
+  if(c.verCrecimiento && anioPrev() != null){
+    /* el sello izquierdo siempre son personas adicionales del año;
+       en un cargo nuevo lo son todas, y el borde grueso marca que el cargo es nuevo */
+    if(esNueva(n)){ const v = plazasProp(n); if(v > 0){ r.izq = "+" + v; r.izqCls = "nv"; } }
+    else {
+      const d = deltaEn(n);
+      if(d > 0){ r.izq = "+" + d; r.izqCls = "nv"; }
+      else if(d < 0){ r.izq = String(d); r.izqCls = "men"; }
+    }
+  }
+  r.wR = Math.max(anchoSello(r.propio), anchoSello(r.acum));
+  r.wL = anchoSello(r.izq);
+  return r;
 }
+const resIzq = s => s.wL ? s.wL + 6 : 0;
+const resDer = s => s.wR ? s.wR + 6 : 0;
 function plan(n){
-  const c = S.cfg, s = sellos(n), maxW = c.w - 14 - (s.w ? s.w + 6 : 0);
+  const c = S.cfg, s = sellos(n), maxW = c.w - 14 - resIzq(s) - resDer(s);
   const t = wrapPx(n.titulo || "(sin nombre)", maxW, c.fs, true);
   const tit = (c.verTitular && n.titular) ? wrapPx(n.titular, maxW, c.fsc, false) : [];
   const fun = (c.verFunciones && n.funciones && n.funciones.length)
@@ -639,14 +732,15 @@ function layout(){
       yb += RES.h + 14;
     }
   }
-  if(c.verCajetin) CAJ = { x: b.x2 - 320, y: yb, w: 320, h: 96 };
+  if(c.verCajetin) CAJ = { x: b.x2 - 320, y: yb, w: 320, h: aniosOrd().length > 1 ? 112 : 96 };
   if(c.verLeyenda){
     const usados = relsUsadas();
     const nota = c.verPlazas && totalGeneral() > 0;
     const ars = areasDeclaradas();
+    const crec = c.verCrecimiento && anioPrev() != null;
     if(usados.length || ars.length) LEY = { x: b.x, y: b.y2 + 34, w: 258,
-      h: 26 + usados.length*17 + (nota ? 30 : 0) + (ars.length ? 22 + ars.length*15 : 0),
-      rels: usados, nota: nota, areas: ars };
+      h: 26 + usados.length*17 + (nota ? 30 : 0) + (crec ? 34 : 0) + (ars.length ? 22 + ars.length*15 : 0),
+      rels: usados, nota: nota, areas: ars, crec: crec };
   }
 }
 /* Filas del cuadro resumen. Las sumas cierran: lo que no cae en el nivel
@@ -656,6 +750,15 @@ function resumenFilas(){
   if(!tot) return F;
   const pct = v => Math.round(v*1000/tot)/10 + "%";
   const fila = (k, v) => F.push({ t:"r", k: k.length > 34 ? k.slice(0,33) + "…" : k, v: String(v), p: pct(v) });
+  if(c.verCrecimiento && anioPrev() != null){
+    const g = crecimiento();
+    F.push({ t:"h", k:"CRECIMIENTO " + g.prev + " → " + anioAct() });
+    if(g.nuevas) fila(g.nuevas + " cargo(s) nuevo(s)", g.plazasNuevas);
+    if(g.ampliadas) fila("Ampliación de cargos existentes", g.ampliadas);
+    if(g.reducidas) F.push({ t:"r", k:"Reducción de plazas", v:"-" + g.reducidas, p:"" });
+    if(g.bajas) F.push({ t:"r", k:g.bajas + " cargo(s) dado(s) de baja", v:"", p:"" });
+    if(!g.nuevas && !g.ampliadas && !g.reducidas && !g.bajas) F.push({ t:"r", k:"Sin cambios frente a " + g.prev, v:"", p:"" });
+  }
   if(c.resumenPor !== "categoria"){
     F.push({ t:"h", k:"POR ÁREA (NIVEL " + (c.resumenNivel+1) + ")" });
     const arr = Object.keys(S.nodes).filter(id => P[id] && P[id].d === c.resumenNivel)
@@ -816,8 +919,8 @@ function nodosSVG(){
     if(c.tintarStaff && !TIPOS[n.tipo].arbol) fill = mezcla(fill, "#000000", .06);
     const cls = "nd" + (id === sel ? " sel" : "");
     const s = sellos(n);
-    /* el texto se centra en el espacio libre: nunca pasa por debajo del sello */
-    const cx = (p.x + (p.w - (s.w ? s.w + 6 : 0))/2).toFixed(1);
+    /* el texto se centra en el espacio libre: nunca pasa por debajo de un sello */
+    const cx = (p.x + resIzq(s) + (p.w - resIzq(s) - resDer(s))/2).toFixed(1);
     let y = p.y + (p.h - pl.h)/2 + c.fs*.95;
     let txt = "";
     pl.t.forEach(l => { txt += `<text class="t" x="${cx}" y="${y.toFixed(1)}">${esc(l)}</text>`; y += c.fs*1.24; });
@@ -831,19 +934,22 @@ function nodosSVG(){
     }
     let sel2 = "";
     if(s.propio) sel2 += selloSVG(p.x + p.w - 4 - anchoSello(s.propio), p.y + 4, s.propio, "");
-    if(s.acum) sel2 += selloSVG(p.x + p.w - 4 - anchoSello(s.acum), p.y + p.h - 19, s.acum, " ac");
+    if(s.acum) sel2 += selloSVG(p.x + p.w - 4 - anchoSello(s.acum), p.y + p.h - 19, s.acum, "ac");
+    /* crecimiento del año activo: cargo nuevo y plazas adicionales */
+    const nueva = c.verCrecimiento && anioPrev() != null && esNueva(n);
+    if(s.izq) sel2 += selloSVG(p.x + 4, p.y + 4, s.izq, s.izqCls);
     out += `<g class="${cls}" data-id="${id}">`
-      + `<rect class="bx" x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="${c.r}" fill="${fill}"/>`
+      + `<rect class="bx${nueva ? " nv" : ""}" x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="${c.r}" fill="${fill}"/>`
       + txt + sel2
       + `<rect class="selr" x="${p.x-4}" y="${p.y-4}" width="${p.w+8}" height="${p.h+8}" rx="${c.r+2}"/>`
       + `</g>`;
   });
   return out;
 }
-function selloSVG(x, y, t, extra){
-  const w = anchoSello(t);
-  return `<rect class="sl${extra}" x="${x.toFixed(1)}" y="${y}" width="${w.toFixed(1)}" height="15" rx="7"/>`
-       + `<text class="st" x="${(x + w/2).toFixed(1)}" y="${y + 10.8}">${esc(t)}</text>`;
+function selloSVG(x, y, t, cls){
+  const w = anchoSello(t), c = cls ? " " + cls.trim() : "";
+  return `<rect class="sl${c}" x="${x.toFixed(1)}" y="${y}" width="${w.toFixed(1)}" height="15" rx="7"/>`
+       + `<text class="st${c}" x="${(x + w/2).toFixed(1)}" y="${y + 10.8}">${esc(t)}</text>`;
 }
 function cajetinSVG(){
   let out = "";
@@ -873,6 +979,7 @@ function cajetinSVG(){
       ["Aprobado por", m.aprobado || "—"],
       ["Fecha de actualización", m.fecha ? fechaLarga(m.fecha) : "— (falta)"]
     ];
+    if(aniosOrd().length > 1) L.splice(1, 0, ["Año", anioAct() + (anioAct() > anioBase() ? "  ·  PROPUESTA" : "  ·  vigente")]);
     out += `<g class="caj"><rect x="${CAJ.x}" y="${CAJ.y}" width="${CAJ.w}" height="${CAJ.h}" rx="2"/>`;
     if(m.subtitulo) out += `<text class="cs" x="${CAJ.x+8}" y="${CAJ.y-8}">${esc(m.subtitulo)}</text>`;
     L.forEach((r,i) => {
@@ -894,11 +1001,18 @@ function cajetinSVG(){
       const y = LEY.y + 30 + LEY.rels.length*17;
       out += selloSVG(LEY.x+8, y-8, "n", "")
            + `<text class="cv2" x="${LEY.x+60}" y="${y+3.5}">Personas en la unidad</text>`
-           + selloSVG(LEY.x+8, y+7, "Σn", " ac")
+           + selloSVG(LEY.x+8, y+7, "Σn", "ac")
            + `<text class="cv2" x="${LEY.x+60}" y="${y+18.5}">Total del área, con dependencias</text>`;
     }
+    if(LEY.crec){
+      const y = LEY.y + 30 + LEY.rels.length*17 + (LEY.nota ? 30 : 0) + 4;
+      out += selloSVG(LEY.x+8, y-8, "+n", "nv")
+           + `<text class="cv2" x="${LEY.x+60}" y="${y+3.5}">Personas que se suman en ${anioAct()}</text>`
+           + `<rect x="${LEY.x+8}" y="${y+8}" width="44" height="12" rx="2" fill="none" stroke="${S.cfg.colNuevoBorde}" stroke-width="2.4"/>`
+           + `<text class="cv2" x="${LEY.x+60}" y="${y+18.5}">Cargo nuevo en ${anioAct()}</text>`;
+    }
     if(LEY.areas && LEY.areas.length){
-      let y = LEY.y + 30 + LEY.rels.length*17 + (LEY.nota ? 30 : 0) + 8;
+      let y = LEY.y + 30 + LEY.rels.length*17 + (LEY.nota ? 30 : 0) + (LEY.crec ? 34 : 0) + 8;
       out += `<text class="ck" x="${LEY.x+8}" y="${y}">ÁREAS</text>`;
       LEY.areas.forEach((n,i) => {
         const yy = y + 15 + i*15;
@@ -925,6 +1039,11 @@ function svgCSS(){
 .sl{fill:${mezcla(c.colBorde,"#ffffff",.86)};stroke:${mezcla(c.colBorde,"#ffffff",.5)};stroke-width:.8}
 .sl.ac{fill:none;stroke-dasharray:2.5 2}
 .st{font:600 9.5px "Segoe UI",system-ui,Arial,sans-serif;fill:${c.colTexto};text-anchor:middle}
+.nd .bx.nv{stroke:${c.colNuevoBorde};stroke-width:2.4}
+.sl.nv{fill:${c.colNuevoFondo};stroke:${c.colNuevoBorde};stroke-width:1}
+.st.nv{fill:${c.colNuevoBorde};font-weight:700}
+.sl.men{fill:none;stroke:${mezcla(c.colTexto,"#ffffff",.55)};stroke-dasharray:2 2}
+.st.men{fill:${mezcla(c.colTexto,"#ffffff",.35)}}
 .caj rect{fill:none;stroke:${c.colBorde};stroke-width:1}
 .caj text.ck{font:600 9.5px "Segoe UI",system-ui,Arial,sans-serif;fill:${mezcla(c.colTexto,"#ffffff",.3)};letter-spacing:.4px}
 .caj text.cv{font:400 10px "Segoe UI",system-ui,Arial,sans-serif;fill:${c.colTexto};text-anchor:end}
@@ -1030,6 +1149,21 @@ function auditar(){
     if(sinDato) W(`${sinDato} unidad(es) sin n.º de personas: el resumen las cuenta como 0 y el total puede quedar corto.`);
     G(`Plantilla declarada: ${tot} personas. Los acumulados por área cierran contra ese total.`);
   }
+  if(aniosOrd().length > 1 && anioAct() > anioBase()){
+    const t = (m.titulo + " " + m.subtitulo).toLowerCase();
+    if(t.indexOf("propuest") < 0 && t.indexOf("proyect") < 0 && t.indexOf("plan") < 0)
+      W(`Estás viendo <b>${anioAct()}</b>, que es estructura proyectada, no aprobada. La doctrina distingue el
+        organigrama real del <b>propuesto</b>: pon "propuesta ${anioAct()}" en el título o el subtítulo antes de
+        entregarlo. El cajetín ya lo marca como PROPUESTA.`);
+    const arrastre = nodos.filter(n => n.hasta && descendientes(n.id).some(x => !S.nodes[x].hasta));
+    if(arrastre.length) W(`Al dar de baja ${arrastre.slice(0,2).map(n => esc(n.titulo) + " (" + n.hasta + ")").join(", ")},
+      sus dependencias también desaparecen del organigrama. Si esos cargos se mantienen, reasígnalos a otro jefe;
+      si desaparecen con él, ponles su propio año de término para que quede explícito.`);
+    const huerfanas = nodos.filter(n => n.parent && visibleEn(n.parent, anioAct()) === false
+      && (n.desde == null || +n.desde <= anioAct()));
+    if(huerfanas.length) E(`${huerfanas.length} unidad(es) previstas para este año dependen de una unidad que todavía
+      no existe (${huerfanas.slice(0,3).map(n => esc(n.titulo)).join(", ")}): no se dibujan. Ajusta el año de su jefe.`);
+  }
   const realineadas = nodos.filter(n => n.nivelVisual !== null && n.nivelVisual !== undefined && n.nivelVisual !== "");
   if(realineadas.length){
     const rotuladas = (c.bandas || []).some(x => (x||"").trim()) && c.verBandas;
@@ -1085,8 +1219,26 @@ function renderNode(){
   box.innerHTML = `<div id="ndTitle"><span>Unidad</span><em>nivel ${p.d+1}</em></div>
     <div class="f wide"><label>Nombre de la unidad</label><input id="fTit" value="${esc(n.titulo)}"></div>
     <div class="f wide"><label>Titular o cargo (opcional)</label><input id="fTitular" value="${esc(n.titular)}"></div>
-    <div class="f"><label>N.º de personas</label><input type="number" id="fPers" min="0" max="99999" step="1"
+    <div class="f"><label>N.º de personas ${aniosOrd().length > 1 ? "en <b>"+anioAct()+"</b>" : ""}</label>
+      <input type="number" id="fPers" min="0" max="99999" step="1"
       placeholder="sin dato" value="${tienePlazas(n) ? plazasProp(n) : ""}"></div>
+    ${ aniosOrd().length > 1 ? `<p class="hint" style="margin:0 0 6px">${
+        aniosOrd().map(a => { const v = plazasEn(n, a);
+          const vis = visibleEn(sel, a);
+          return `<span style="opacity:${vis?1:.4}">${a}: ${vis ? (v==null?"—":v) : "no existe"}</span>`;
+        }).join(" · ")}</p>
+      <div class="f"><label>Existe desde</label><select id="fDesde">
+        <option value=""${n.desde==null||n.desde===""?" selected":""}>Siempre (${anioBase()})</option>
+        ${aniosOrd().filter(a => a > anioBase()).map(a =>
+          `<option value="${a}"${+n.desde===a?" selected":""}>${a}</option>`).join("")}
+      </select></div>
+      <div class="f"><label>Existe hasta</label><select id="fHasta">
+        <option value=""${n.hasta==null||n.hasta===""?" selected":""}>Indefinido</option>
+        ${aniosOrd().map(a => `<option value="${a}"${+n.hasta===a?" selected":""}>${a}${
+          a < aniosOrd()[aniosOrd().length-1] ? " (se va en " + (a+1) + ")" : ""}</option>`).join("")}
+      </select></div>
+      ${ n.hasta && descendientes(sel).length ? `<div class="alert w" style="margin-bottom:6px">Al terminar en ${n.hasta},
+        sus ${descendientes(sel).length} dependencia(s) también dejan de aparecer. Si se reubican, cámbialas de jefe.</div>` : "" }` : "" }
     <div class="f"><label>Categoría de cargo</label><input id="fCat" list="catList" placeholder="opcional" value="${esc(n.categoria||"")}"></div>
     <datalist id="catList">${categorias().map(k => `<option value="${esc(k)}"></option>`).join("")}</datalist>
     ${ kidsAll(sel).length ? `<p class="hint" style="margin:0 0 6px">Total del área con dependencias: <b>${totalArea(sel)}</b> personas.</p>` : "" }
@@ -1128,9 +1280,11 @@ function renderNode(){
   if(fFun) fFun.oninput = () => { n.funciones = fFun.value.split("\n").map(s=>s.trim()).filter(Boolean); autosave(); renderCanvas(); renderAudit(); };
   const fPers = $("#fPers");
   if(fPers) fPers.oninput = () => {
-    n.personas = fPers.value === "" ? null : Math.max(0, Math.round(+fPers.value) || 0);
+    fijarPlazas(n, anioAct(), fPers.value === "" ? null : Math.max(0, Math.round(+fPers.value) || 0));
     autosave(); renderCanvas(); renderPlaza(); renderAudit();
   };
+  if($("#fDesde")) $("#fDesde").onchange = e => { snap(); n.desde = e.target.value === "" ? null : +e.target.value; refresh(); };
+  if($("#fHasta")) $("#fHasta").onchange = e => { snap(); n.hasta = e.target.value === "" ? null : +e.target.value; refresh(); };
   const fCat = $("#fCat");
   if(fCat) fCat.oninput = () => { n.categoria = fCat.value; autosave(); renderCanvas(); renderPlaza(); renderAudit(); };
   $("#fTipo").onchange = e => {
@@ -1284,7 +1438,16 @@ function renderPlaza(){
         <td style="text-align:right;font-size:11.5px;font-variant-numeric:tabular-nums;${b}">${esc(f.v)}</td>
         <td style="text-align:right;font-size:10.5px;color:var(--ink-soft);padding-left:6px;${b}">${esc(f.p||"")}</td></tr>`;
     }).join("") + `</table>` : `<p class="empty">Escribe el n.º de personas en las cajas para armar el resumen.</p>`;
-  $("#secPlaza").innerHTML = `<h3>Plantilla <span class="badge">${tot} personas</span></h3>
+  const A = aniosOrd();
+  $("#secPlaza").innerHTML = `<h3>Plantilla ${A.length>1?"<em>"+anioAct()+"</em>":""} <span class="badge">${tot} personas</span></h3>
+    <div class="f wide"><label>Años del plan</label>
+      <div style="display:flex;gap:4px;flex-wrap:wrap">${A.map(a =>
+        `<button class="b${a===anioAct()?" on":""}" data-anio="${a}" title="Ver y editar ${a}">${a}</button>`).join("")}
+        <button class="b" id="zMasAnio" title="Agregar el año siguiente">+</button>
+        ${A.length>1?`<button class="b danger" id="zMenosAnio" title="Quitar ${A[A.length-1]}">−</button>`:""}
+      </div></div>
+    ${A.length>1?`<div class="f chk"><input type="checkbox" id="zCrec"${c.verCrecimiento?" checked":""}><label>Resaltar crecimiento del año</label></div>
+      <div class="f"><label>Color del resalte</label><input type="color" id="zColNvo" value="${c.colNuevoBorde}"></div>`:""}
     <div class="f chk"><input type="checkbox" id="zPl"${c.verPlazas?" checked":""}><label>Mostrar n.º de personas en las cajas</label></div>
     <div class="f chk"><input type="checkbox" id="zAc"${c.verAcumulado?" checked":""}><label>Mostrar total acumulado por área (Σ)</label></div>
     <div class="f chk"><input type="checkbox" id="zRe"${c.verResumen?" checked":""}><label>Incluir cuadro resumen en el gráfico</label></div>
@@ -1304,23 +1467,64 @@ function renderPlaza(){
   bind("#zRe", v => c.verResumen = v); bind("#zPor", v => c.resumenPor = v);
   bind("#zNiv", v => c.resumenNivel = +v);
   $("#zCsv").onclick = exportCSV;
+  document.querySelectorAll("[data-anio]").forEach(b => b.onclick = () => irAnio(+b.dataset.anio));
+  $("#zMasAnio").onclick = agregarAnio;
+  if($("#zMenosAnio")) $("#zMenosAnio").onclick = quitarAnio;
+  if($("#zCrec")) $("#zCrec").onchange = e => { c.verCrecimiento = e.target.checked; refresh(); };
+  if($("#zColNvo")) $("#zColNvo").oninput = e => { c.colNuevoBorde = e.target.value;
+    c.colNuevoFondo = mezcla(e.target.value, "#ffffff", .85); autosave(); renderCanvas(); };
+}
+function irAnio(a){
+  S.cfg.anio = a;
+  if(sel && !visibleEn(sel, a)) sel = null;
+  refresh();
+  status(a > anioBase() ? `Viendo ${a}: organigrama propuesto` : `Viendo ${a}: estructura vigente`);
+}
+function agregarAnio(){
+  snap();
+  const A = aniosOrd();
+  S.cfg.anios = A.concat([A[A.length-1] + 1]);
+  irAnio(A[A.length-1] + 1);
+}
+function quitarAnio(){
+  const A = aniosOrd();
+  if(A.length < 2) return;
+  const ult = A[A.length-1];
+  const usan = Object.values(S.nodes).filter(n => +n.desde === ult || +n.hasta === ult || (n.plazasAnio||{})[String(ult)] != null).length;
+  if(usan && !confirm(`${usan} unidad(es) tienen datos de ${ult}. ¿Quitar el año igual? Los datos de ${ult} se pierden.`)) return;
+  snap();
+  S.cfg.anios = A.slice(0, -1);
+  Object.values(S.nodes).forEach(n => {
+    if(+n.desde === ult) n.desde = null;
+    if(+n.hasta === ult) n.hasta = null;
+    if(n.plazasAnio) delete n.plazasAnio[String(ult)];
+  });
+  irAnio(S.cfg.anios[S.cfg.anios.length-1]);
 }
 function exportCSV(){
   layout();
-  const L = [["Nivel","Banda visual","Area","Unidad","Tipo","Depende de","Categoria de cargo","Personas","Total del area","Titular"].join(";")];
+  const A = aniosOrd();
   const q = t => `"${String(t==null?"":t).replace(/"/g,'""')}"`;
-  const ordenados = Object.keys(S.nodes).sort((a,b) => (P[a].d - P[b].d) || (P[a].x - P[b].x));
+  const L = [["Nivel","Banda visual","Area","Unidad","Tipo","Depende de","Categoria de cargo",
+    "Existe desde","Baja en"].concat(A.map(a => "Personas " + a)).concat(["Total del area " + anioAct(),"Titular"]).join(";")];
+  const prof = {};
+  (function walk(id, d){ prof[id] = d; kidsAll(id).forEach(k => walk(k.id, d+1)); })(S.root, 0);
+  const ordenados = Object.keys(S.nodes).sort((a,b) =>
+    (prof[a] - prof[b]) || ((P[a] ? P[a].x : 0) - (P[b] ? P[b].x : 0)));
   ordenados.forEach(id => {
-    const n = S.nodes[id];
-    const ar = areaDe(id);
-    L.push([ P[id].d + 1, q((S.cfg.bandas[P[id].b] || "").trim() || ("Nivel " + ((P[id].b||0)+1))),
+    const n = S.nodes[id], p = P[id], ar = areaDe(id);
+    L.push([ prof[id] + 1,
+      q(p ? ((S.cfg.bandas[p.b] || "").trim() || ("Nivel " + ((p.b||0)+1))) : "no existe en " + anioAct()),
       q(ar ? ar.titulo : ""), q(n.titulo), q(TIPOS[n.tipo].nom),
       q(n.parent ? (S.nodes[n.parent]||{}).titulo : "—"), q(n.categoria || ""),
-      tienePlazas(n) ? plazasProp(n) : "", totalArea(id), q(n.titular || "") ].join(";"));
+      n.desde || A[0], n.hasta || "" ]
+      .concat(A.map(a => visibleEn(id, a) ? (plazasEn(n, a) == null ? "" : plazasEn(n, a)) : ""))
+      .concat([ p ? totalArea(id) : "", q(n.titular || "") ]).join(";"));
   });
-  L.push(["", "", "", q("TOTAL"), "", "", "", totalGeneral(), "", ""].join(";"));
+  const tot = A.map(a => { const guarda = S.cfg.anio; S.cfg.anio = a; const t = totalGeneral(); S.cfg.anio = guarda; return t; });
+  L.push(["", "", "", q("TOTAL"), "", "", "", "", ""].concat(tot).concat(["", ""]).join(";"));
   bajar(slug() + "-padron.csv", new Blob(["﻿" + L.join("\r\n")], { type:"text/csv;charset=utf-8" }));
-  status("Padrón exportado en CSV");
+  status("Padrón exportado en CSV con una columna por año");
 }
 function renderAudit(){
   const A = auditar();
@@ -1331,6 +1535,12 @@ function renderAudit(){
     + A.map(x => `<div class="alert ${x.s}">${x.t}</div>`).join("")
     + `<p class="hint">Criterios de precisión, presentación, sencillez, uniformidad y vigencia.
        Ver el botón <b>Normativa</b> de la barra superior para el detalle de cada regla.</p>`;
+}
+function renderAnios(){
+  const A = aniosOrd();
+  $("#selAnio").innerHTML = A.map(a =>
+    `<option value="${a}"${a===anioAct()?" selected":""}>${a}${a>anioBase()?" (propuesta)":""}</option>`).join("");
+  $("#selAnio").style.color = anioAct() > anioBase() ? S.cfg.colNuevoBorde : "";
 }
 function renderRels(){
   $("#relList").innerHTML = S.rel.length
@@ -1371,6 +1581,7 @@ function agregar(tipo, comoHermana){
   snap();
   const id = uid();
   const n = nodo(id, padre, tipo, "Nueva unidad", kidsAll(padre).length);
+  if(anioAct() > anioBase()) n.desde = anioAct();   /* nace en el año que estás viendo */
   if(!TIPOS[tipo].arbol) n.lado = kidsSide(padre).filter(x => x.lado === "L").length
     > kidsSide(padre).filter(x => x.lado === "R").length ? "R" : "L";
   S.nodes[id] = n;
@@ -1423,7 +1634,7 @@ function reasignar(id, nuevoPadre){
 
 /* ============================ ARCHIVO Y EXPORTACIÓN ====================== */
 function slug(){
-  return (S.meta.titulo || "organigrama").toLowerCase()
+  return (S.meta.titulo || "organigrama").toLowerCase() + (aniosOrd().length > 1 ? "-" + anioAct() : "")
     .normalize("NFD").replace(/[̀-ͯ]/g,"")
     .replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,60) || "organigrama";
 }
@@ -1580,7 +1791,7 @@ function autosave(){
 }
 function refresh(){
   _gate();
-  renderCanvas(); renderNode(); renderMeta(); renderPres(); renderColor(); renderPlaza(); renderAudit(); renderRels();
+  renderCanvas(); renderAnios(); renderNode(); renderMeta(); renderPres(); renderColor(); renderPlaza(); renderAudit(); renderRels();
   $("#btUndo").disabled = !undoStack.length;
   $("#btRedo").disabled = !redoStack.length;
   autosave();
@@ -1764,6 +1975,8 @@ function init(){
   $("#btSave").onclick = guardarJSON;
   $("#btSvg").onclick = exportSVG;
   $("#btCsv").onclick = exportCSV;
+  $("#selAnio").onchange = e => irAnio(+e.target.value);
+  $("#btAnioMas").onclick = agregarAnio;
   $("#btPng").onclick = exportPNG;
   $("#btPrint").onclick = imprimir;
   $("#btUndo").onclick = undo;
