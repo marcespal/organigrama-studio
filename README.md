@@ -236,6 +236,40 @@ Para el PDF: botón **PDF** y en el diálogo del navegador elegir "Guardar como 
   rel[{a,b,tipo}], view{x,y,z} }
 ```
 
+## Dónde se guarda tu trabajo
+
+La herramienta aplica el patrón de **[persistencia segura](https://github.com/marcespal/persistencia-segura-html)**:
+el módulo va incrustado en el archivo, así que sigue siendo un solo HTML.
+
+- **Autoguardado en el navegador** en cada cambio. La píldora de la barra dice en qué estado está:
+  *Cambios sin guardar…* → *Guardado en el navegador*.
+- **Archivo vinculado** (botón `Archivo…`, en Chrome o Edge): eliges tu `.org.json` y a partir de
+  ahí cada cambio se escribe también en el disco. Es lo que sobrevive a que se borren los datos del
+  navegador o a que muevas la herramienta de carpeta — el caso en el que `localStorage` desaparece
+  sin que nada falle visiblemente.
+- **Respaldos**: las 3 versiones anteriores a cada escritura, en IndexedDB, restaurables desde el
+  mismo botón `Archivo…`. Cambiar solo el zoom o el desplazamiento no gasta una ranura.
+
+Las tres guardas, aplicadas:
+
+1. **Una lectura fallida nunca termina en escritura.** Ni al arrancar, ni al vincular, ni al
+   reconectar el archivo recordado. Si lo guardado en el navegador no se puede leer, el autoguardado
+   **queda en pausa** y se ofrece descargar ese contenido tal cual antes de descartarlo.
+2. **Nunca se escribe vacío sobre contenido.** Si la pantalla está en blanco (o con el ejemplo sin
+   tocar) y el archivo vinculado tiene un organigrama, no se escribe: se desvincula y se avisa.
+3. **Una sola pestaña a la vez.** Dos pestañas comparten el guardado y se pisan. La segunda queda
+   bloqueada, siempre con salida (*reintentar* y *abrir de todos modos*), para que un falso positivo
+   no te deje fuera de tu herramienta.
+
+Los avisos salen en la capa propia de la herramienta, nunca en un `alert()` que se cierra con Enter
+sin leerse. Y al cerrar con cambios pendientes, el navegador pregunta.
+
+> Al aplicar el patrón aquí apareció un hueco en el módulo original: `guardarLocal()` escribía el
+> estado en memoria sin comprobar nada, y `beforeunload` la llama siempre. Si la restauración
+> fallaba, lo que había en pantalla era el ejemplo — y al cerrar, el ejemplo reemplazaba lo que no se
+> pudo leer. Es la guarda 1, un piso más abajo. Está corregido en la copia incrustada; falta
+> llevarlo al repo del patrón.
+
 ## Entrega a clientes
 
 Al inicio del `<script>` está el bloque de compilación:

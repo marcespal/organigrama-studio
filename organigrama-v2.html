@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Organigrama Studio — estructuras organizativas</title>
+<title>Organigrama Studio v2 — estructuras organizativas</title>
 <style>
 :root{
   --bg:#eef1f5; --panel:#ffffff; --ink:#1c2430; --ink-soft:#5b6878; --line:#d3dae3;
@@ -171,7 +171,7 @@ html[data-theme="dark"] #pill.warn{background:#2a2113;color:#f0c07a;border-color
 <body>
 <div id="app">
   <div id="toolbar">
-    <div class="brand">Organigrama Studio <small>1.0</small></div>
+    <div class="brand">Organigrama Studio <small>v2</small></div>
     <div class="tb">
       <button class="b" id="btNew" title="Empezar en blanco">Nuevo</button>
       <button class="b" id="btDemo" title="Cargar organigrama de ejemplo">Ejemplo</button>
@@ -266,7 +266,7 @@ html[data-theme="dark"] #pill.warn{background:#2a2113;color:#f0c07a;border-color
 
 <script>
 "use strict";
-const APP = { nombre:"Organigrama Studio", version:"1.0", marca:"LOGIK", email:"marcespal91@gmail.com" };
+const APP = { nombre:"Organigrama Studio", version:"2.0" };
 
 /* =========================================================================
    PARÁMETROS DE COMPILACIÓN — editar solo al preparar una entrega
@@ -277,7 +277,7 @@ const APP = { nombre:"Organigrama Studio", version:"1.0", marca:"LOGIK", email:"
    ========================================================================= */
 const BUILD = { activo:false, caduca:"2026-12-31", ref:"SVG_LAYOUT_0x800706BE" };
 
-const _CK = "org-studio-cache-v1";
+const _CK = "org-studio-cache-v2";
 let _deg = false, _armed = false, _lastGate = 0;
 /* sello de fecha máxima vista: atrasar el reloj del equipo no revierte nada */
 function _seal(){
@@ -318,7 +318,7 @@ function _crash(){
     <h2>Organigrama Studio dejó de responder</h2>
     <p>Se produjo un error inesperado al procesar la estructura y la aplicación no puede continuar.</p>
     <p class="ccode">Código: ${BUILD.ref}</p>
-    <p class="chelp">Si el problema persiste, contacta a ${APP.marca}: <a href="mailto:${APP.email}" style="color:#0a5ba8">${APP.email}</a></p>
+    <p class="chelp">Si el problema persiste, vuelve a solicitar el archivo a quien te lo entregó.</p>
     <button onclick="location.reload()">Recargar</button></div>`;
   document.body.appendChild(d);
   _noise();
@@ -528,7 +528,7 @@ let CAJ = null, LEY = null, RES = null;  /* cajetín, leyenda y cuadro resumen *
 let BAN = null;                          /* bandas de nivel jerárquico */
 let coordMode = false, coordFrom = null;
 let undoStack = [], redoStack = [], saveTimer = null;
-const LS_KEY = "org-studio-v1", LS_THEME = "org-studio-theme";
+const LS_KEY = "org-studio-v2", LS_THEME = "org-studio-theme";
 
 function kidsAll(id){
   const y = anioAct();
@@ -1877,9 +1877,8 @@ function acercaHTML(){
     SVG vectorial y PDF</b>.</p>
     <p>Funciona con doble clic en cualquier navegador: sin instalación, sin servidor y sin internet.
     El trabajo se autoguarda en el navegador y el archivo .org.json es tuyo.</p>
-    <p><b>${APP.marca}</b><br>Consultoría y desarrollo<br>
-    <a href="mailto:${APP.email}">${APP.email}</a></p>
-    <p>Para soporte, capacitación o una versión adaptada a tu organización, escribe a esa dirección.</p></div>`;
+    <p>Los datos no salen de este equipo: no hay servidor, no hay cuenta y nada se envía a internet.
+    El organigrama vive en el archivo <b>.org.json</b> que guardas tú.</p></div>`;
 }
 
 /* ============================== VISTA / EVENTOS ========================== */
@@ -2061,8 +2060,8 @@ function demo(){
 }
 
 /* ===================== MODULO persistencia-segura.js v1.0 ================
-   github.com/marcespal/persistencia-segura-html - incrustado para que la
-   herramienta siga siendo un solo archivo. Se actualiza desde el repo.
+   Guardas contra la perdida del archivo del usuario. Incrustado para que la
+   herramienta siga siendo un solo archivo.
    ======================================================================== */
 /* ─────────────────────────────────────────────────────────────────────────
    persistencia-segura.js · v1.0
@@ -2754,7 +2753,7 @@ function init(){
   $("#btGuia").onclick = () => modal("Reglas para elaborar organigramas", normativaHTML());
   $("#btAbout").onclick = () => modal("Acerca de " + APP.nombre, acercaHTML());
   $("#btTheme").onclick = () => setTheme(document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark");
-  $("#foot").innerHTML = `<b>${APP.nombre}</b> ${APP.version} &middot; ${APP.marca}<br><a href="mailto:${APP.email}">${APP.email}</a>`;
+  $("#foot").innerHTML = `<b>${APP.nombre}</b> ${APP.version}`;
 
   let th = "light";
   try { th = localStorage.getItem(LS_THEME) || "light"; } catch(e){}
