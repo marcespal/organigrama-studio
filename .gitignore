@@ -1,4 +1,6 @@
-# exportaciones de trabajo
+# datos de trabajo: organigramas reales, con nombres y plazas.
+# Nunca al repo de la herramienta (ver README, seccion de entrega).
+*.json
 *.org.json
 *.svg
 *.png
