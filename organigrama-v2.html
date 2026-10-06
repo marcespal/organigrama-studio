@@ -440,7 +440,19 @@ function plazasEn(n, y){
   });
   return val === null || !isFinite(val) ? null : Math.max(0, Math.round(val));
 }
+/* Un año histórico es una foto: lo que se cambia ahí no se arrastra al vigente.
+   Antes de tocar un valor que se hereda, se ancla el que tenía el año siguiente. */
+function anioSig(y){
+  const a = aniosOrd(), i = a.indexOf(+y);
+  return i >= 0 && i < a.length - 1 ? a[i+1] : null;
+}
+const esHistorico = y => tipoAnio(y) === "historico";
 function fijarPlazas(n, y, v){
+  const s = anioSig(y);
+  if(s != null && esHistorico(y) && (!n.plazasAnio || n.plazasAnio[String(s)] == null)){
+    const ant = plazasEn(n, s);
+    if(ant !== null){ if(!n.plazasAnio) n.plazasAnio = {}; n.plazasAnio[String(s)] = ant; }
+  }
   if(y === anioBase()){ n.personas = v; if(n.plazasAnio) delete n.plazasAnio[String(y)]; }
   else {
     if(!n.plazasAnio) n.plazasAnio = {};
@@ -1736,22 +1748,64 @@ function agregar(tipo, comoHermana){
   const id = uid();
   const n = nodo(id, padre, tipo, "Nueva unidad", kidsAll(padre).length);
   if(anioAct() > anioBase()) n.desde = anioAct();   /* nace en el año que estás viendo */
+  if(esHistorico(anioAct())) n.hasta = anioAct();   /* y si es histórico, se queda en ese año */
   if(!TIPOS[tipo].arbol) n.lado = kidsSide(padre).filter(x => x.lado === "L").length
     > kidsSide(padre).filter(x => x.lado === "R").length ? "R" : "L";
   S.nodes[id] = n;
   sel = id;
   refresh();
+  if(esHistorico(anioAct())) status(`Creado solo para ${anioAct()}: si siguió existiendo, cambia "Existe hasta"`);
   const f = $("#fTit"); if(f){ f.focus(); f.select(); }
 }
 function duplicar(){
   if(!sel || !S.nodes[sel] || !S.nodes[sel].parent) return;
   snap();
   const o = S.nodes[sel], id = uid();
-  S.nodes[id] = Object.assign(clone(o), { id, ord:o.ord + .5 });
+  const y = anioAct();
+  S.nodes[id] = Object.assign(clone(o), { id, ord:o.ord + .5,
+    desde: y > anioBase() ? y : o.desde, hasta: esHistorico(y) ? y : o.hasta });
   normalizarOrden(o.parent);
   sel = id; refresh();
 }
+/* Borrar mira el año: si el cargo existe en otros años, lo normal es quitarlo
+   solo de este (nace después o se da de baja), no hacerlo desaparecer de todos. */
 function borrar(){
+  if(!sel || !S.nodes[sel] || !S.nodes[sel].parent) return;
+  const A = aniosOrd(), y = anioAct(), n = S.nodes[sel], id = sel;
+  const vive = A.filter(a => visibleEn(id, a)), i = vive.indexOf(y);
+  if(A.length < 2 || vive.length < 2 || i < 0){ borrarDelTodo(); return; }
+  const dep = descendientes(id).filter(x => visibleEn(x, y)).length;
+  const otros = vive.filter(a => a !== y);
+  let op, txt;
+  if(i === 0){
+    op = () => { n.desde = vive[1]; };
+    txt = `<b>Quitar solo de ${y}</b><br>En ${y} este cargo todavía no existía; nace en ${vive[1]}. `
+        + `${otros.join(", ")} no cambian.`;
+  } else if(i === vive.length - 1){
+    op = () => { n.hasta = vive[i-1]; };
+    txt = `<b>Quitar solo de ${y}</b><br>El cargo existe hasta ${vive[i-1]}. ${vive.slice(0, i).join(", ")} no cambian.`;
+  } else {
+    op = () => { n.hasta = vive[i-1]; };
+    txt = `<b>Dar de baja desde ${y}</b><br>Desaparece de ${vive.slice(i).join(", ")}; `
+        + `${vive.slice(0, i).join(", ")} no cambian. Un cargo no puede faltar solo en un año del medio.`;
+  }
+  modal("Quitar " + esc(n.titulo), `<div class="abox">
+      <p>"${esc(n.titulo)}" aparece en ${vive.join(", ")}. ¿Qué quieres hacer?</p>
+      ${dep ? `<p>Los <b>${dep}</b> cargo(s) que dependen de él en ${y} también salen de ese año. Si alguno
+        seguía con otro jefe, reasígnalo antes.</p>` : ""}</div>
+    <div class="btnrow" style="flex-direction:column;align-items:stretch;gap:8px">
+      <button class="b on" id="bqAnio" style="text-align:left;white-space:normal;line-height:1.35">${txt}</button>
+      <button class="b danger" id="bqTodo" style="text-align:left;white-space:normal;line-height:1.35">
+        <b>Eliminar de todos los años</b><br>Borra el cargo y lo que depende de él en cualquier año.</button>
+    </div>`);
+  $("#bqAnio").onclick = () => {
+    closeModal(); snap(); op(); sel = padreEn(id, y) || S.root; refresh();
+    status(`"${n.titulo}" quitado de ${y}; los demás años quedan igual`);
+  };
+  $("#bqTodo").onclick = () => { closeModal(); borrarDelTodo(); };
+  $("#bqAnio").focus();
+}
+function borrarDelTodo(){
   if(!sel || !S.nodes[sel] || !S.nodes[sel].parent) return;
   const hijos = descendientesTodos(sel);   /* de cualquier año, para no dejar huérfanas */
   if(hijos.length && !confirm(`Se eliminará "${S.nodes[sel].titulo}" y ${hijos.length} unidad(es) que dependen de ella en algún año. ¿Continuar?`)) return;
@@ -1784,6 +1838,7 @@ function reasignar(id, nuevoPadre){
   if(descendientes(id).indexOf(nuevoPadre) >= 0) { status("No se puede colgar una unidad de su propia dependencia"); return; }
   const y = anioAct(), viejo = padreEn(id, y);
   if(viejo === nuevoPadre) return;
+  const s = anioSig(y), jefeSig = s != null ? padreEn(id, s) : null;
   snap();
   if(y === anioBase()){
     n.parent = nuevoPadre;                       /* cambio estructural, todos los años */
@@ -1792,17 +1847,23 @@ function reasignar(id, nuevoPadre){
     if(!n.parentAnio) n.parentAnio = {};
     n.parentAnio[String(y)] = nuevoPadre;        /* reorganización a partir de ese año */
   }
+  if(s != null && esHistorico(y) && padreEn(id, s) !== jefeSig){
+    if(!n.parentAnio) n.parentAnio = {};
+    n.parentAnio[String(s)] = jefeSig;           /* el año siguiente conserva su jefe */
+  }
   n.ord = kidsAll(nuevoPadre).length;
   normalizarOrden(viejo); normalizarOrden(nuevoPadre);
   refresh();
-  status(y === anioBase()
+  status(esHistorico(y)
+    ? `En ${y}, "${n.titulo}" dependía de "${S.nodes[nuevoPadre].titulo}"; ${s} no cambia`
+    : y === anioBase()
     ? `"${n.titulo}" ahora depende de "${S.nodes[nuevoPadre].titulo}"`
     : `Desde ${y}, "${n.titulo}" pasa a depender de "${S.nodes[nuevoPadre].titulo}"`);
 }
 
 /* ============================ ARCHIVO Y EXPORTACIÓN ====================== */
 function slug(){
-  return (S.meta.titulo || "organigrama").toLowerCase() + (aniosOrd().length > 1 ? "-" + anioAct() : "")
+  return ((S.meta.titulo || "organigrama") + (aniosOrd().length > 1 ? "-" + anioAct() : "")).toLowerCase()
     .normalize("NFD").replace(/[̀-ͯ]/g,"")
     .replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,60) || "organigrama";
 }

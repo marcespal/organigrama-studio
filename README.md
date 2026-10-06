@@ -60,6 +60,13 @@ que se ve y lo que se edita; con el botón **+** se agrega el año siguiente.
 - **Año vigente**: cuál de todos es la estructura aprobada. Los anteriores se rotulan como
   *históricos* y los posteriores como *propuesta*, en el selector de la barra y en el cajetín. Antes
   esto era el primer año de la lista; dejó de serlo en cuanto se pudo agregar historia.
+- **Un año histórico es una foto**: lo que cambias ahí se queda ahí. Las plazas y las
+  reasignaciones anclan el valor del año siguiente antes de cambiar, y un cargo creado en un año
+  histórico nace con *Existe hasta* ese mismo año. El nombre, el titular y los colores sí son de la
+  unidad en todos los años: si en 2025 se llamaba distinto, son dos unidades.
+- **Quitar un cargo mira el año**: si existe en otros años, *Supr* ofrece quitarlo solo del que
+  estás viendo (en el primero: nace después; en el último: se da de baja; en uno del medio: baja
+  desde ahí) o, aparte, eliminarlo de todos los años.
 - **Quitar un año**: el botón quita el que estás viendo, y solo si es el primero o el último — sacar
   uno del medio dejaría huecos en los arrastres y en las reasignaciones. Si quitas el primero, el
   siguiente vuelve a ser el base con sus propios valores.
