@@ -148,6 +148,9 @@ html[data-theme="dark"] #pill.warn{background:#2a2113;color:#f0c07a;border-color
 .bkrow:last-child{border-bottom:0}
 .bkrow b{display:block;font-size:12.5px;color:var(--ink)}
 .bkrow span{color:var(--ink-soft)}
+#destino{padding:10px 10px 0;font-size:11.5px;line-height:1.5;color:var(--ink-soft)}
+#destino .arch{display:block;word-break:break-all;color:var(--accent);font-weight:600;margin:2px 0}
+#destino b{color:var(--ink)}
 #printHost{display:none}
 @media print{
   #app{display:none}
@@ -258,6 +261,7 @@ html[data-theme="dark"] #pill.warn{background:#2a2113;color:#f0c07a;border-color
       <div class="sec" id="secColor"></div>
       <div class="sec" id="secPlaza"></div>
       <div class="sec" id="secAudit"></div>
+      <div id="destino"></div>
       <div id="foot"></div>
     </div>
   </div>
@@ -380,6 +384,15 @@ function nodo(id, parent, tipo, titulo, ord){
    ======================================================================== */
 const aniosOrd = () => (S.cfg.anios && S.cfg.anios.length ? S.cfg.anios.slice().sort((a,b)=>a-b) : [new Date().getFullYear()]);
 const anioBase = () => aniosOrd()[0];
+/* El año base es el primero de la lista; el vigente es el de la estructura
+   aprobada. Eran lo mismo hasta que se pudo agregar un año anterior: 2025 es
+   histórico y 2026 sigue siendo el vigente. */
+function anioVigente(){
+  const A = aniosOrd(), v = +S.cfg.anioVigente;
+  return A.indexOf(v) >= 0 ? v : A[0];
+}
+const tipoAnio = y => { y = (y == null ? anioAct() : y); const v = anioVigente();
+  return y < v ? "historico" : (y > v ? "propuesta" : "vigente"); };
 const anioAct = () => { const a = aniosOrd(); return a.indexOf(+S.cfg.anio) >= 0 ? +S.cfg.anio : a[0]; };
 function anioPrev(y){
   const a = aniosOrd(), i = a.indexOf(+(y == null ? anioAct() : y));
@@ -514,6 +527,7 @@ function blankState(){
           verCajetin:true, verLeyenda:true, tramoMax:7, nivelMax:5,
           verPlazas:true, verAcumulado:true, verResumen:true, resumenNivel:1, resumenPor:"ambos",
           anios:[new Date().getFullYear()], anio:new Date().getFullYear(),
+          anioVigente:null,
           colNuevoBorde:"#c2410c", colNuevoFondo:"#ffedd5", verCrecimiento:true,
           pasoDesnivel:24, verBandas:false,
           bandas:["Gerencia","Jefatura","Coordinación","Analista","Asistente","Operativo","",""] },
@@ -1046,7 +1060,8 @@ function cajetinSVG(){
       ["Aprobado por", m.aprobado || "—"],
       ["Fecha de actualización", m.fecha ? fechaLarga(m.fecha) : "— (falta)"]
     ];
-    if(aniosOrd().length > 1) L.splice(1, 0, ["Año", anioAct() + (anioAct() > anioBase() ? "  ·  PROPUESTA" : "  ·  vigente")]);
+    if(aniosOrd().length > 1) L.splice(1, 0, ["Año", anioAct() + "  ·  "
+      + ({ historico:"HISTÓRICO", vigente:"vigente", propuesta:"PROPUESTA" })[tipoAnio()]]);
     out += `<g class="caj"><rect x="${CAJ.x}" y="${CAJ.y}" width="${CAJ.w}" height="${CAJ.h}" rx="2"/>`;
     if(m.subtitulo) out += `<text class="cs" x="${CAJ.x+8}" y="${CAJ.y-8}">${esc(m.subtitulo)}</text>`;
     L.forEach((r,i) => {
@@ -1218,7 +1233,7 @@ function auditar(){
     if(sinDato) W(`${sinDato} unidad(es) sin n.º de personas: el resumen las cuenta como 0 y el total puede quedar corto.`);
     G(`Plantilla declarada: ${tot} personas. Los acumulados por área cierran contra ese total.`);
   }
-  if(aniosOrd().length > 1 && anioAct() > anioBase()){
+  if(aniosOrd().length > 1 && tipoAnio() === "propuesta"){
     const t = (m.titulo + " " + m.subtitulo).toLowerCase();
     if(t.indexOf("propuest") < 0 && t.indexOf("proyect") < 0 && t.indexOf("plan") < 0)
       W(`Estás viendo <b>${anioAct()}</b>, que es estructura proyectada, no aprobada. La doctrina distingue el
@@ -1524,11 +1539,18 @@ function renderPlaza(){
   const A = aniosOrd();
   $("#secPlaza").innerHTML = `<h3>Plantilla ${A.length>1?"<em>"+anioAct()+"</em>":""} <span class="badge">${tot} personas</span></h3>
     <div class="f wide"><label>Años del plan</label>
-      <div style="display:flex;gap:4px;flex-wrap:wrap">${A.map(a =>
-        `<button class="b${a===anioAct()?" on":""}" data-anio="${a}" title="Ver y editar ${a}">${a}</button>`).join("")}
-        <button class="b" id="zMasAnio" title="Agregar el año siguiente">+</button>
-        ${A.length>1?`<button class="b danger" id="zMenosAnio" title="Quitar ${A[A.length-1]}">−</button>`:""}
+      <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center">
+        <button class="b" id="zAntesAnio" title="Agregar ${A[0]-1}, como copia de ${A[0]}">+ ${A[0]-1}</button>
+        ${A.map(a => `<button class="b${a===anioAct()?" on":""}" data-anio="${a}"
+          title="Ver y editar ${a}${a===anioVigente()?" (vigente)":""}">${a}${a===anioVigente()?" •":""}</button>`).join("")}
+        <button class="b" id="zMasAnio" title="Agregar ${A[A.length-1]+1}">+ ${A[A.length-1]+1}</button>
       </div></div>
+    ${A.length>1?`<div class="f"><label>Año vigente</label><select id="zVigente">${
+      A.map(a => `<option value="${a}"${a===anioVigente()?" selected":""}>${a}</option>`).join("")
+    }</select></div>
+    <div class="btnrow"><button class="b danger" id="zQuitarAnio"${
+      (anioAct()===A[0]||anioAct()===A[A.length-1])?"":" disabled"
+    } title="${(anioAct()===A[0]||anioAct()===A[A.length-1])?"Quita "+anioAct()+" del plan":"Solo se puede quitar el primer o el último año"}">Quitar ${anioAct()}</button></div>`:""}
     ${A.length>1?`<div class="f chk"><input type="checkbox" id="zCrec"${c.verCrecimiento?" checked":""}><label>Resaltar crecimiento del año</label></div>
       <div class="f"><label>Color del resalte</label><input type="color" id="zColNvo" value="${c.colNuevoBorde}"></div>`:""}
     <div class="f chk"><input type="checkbox" id="zPl"${c.verPlazas?" checked":""}><label>Mostrar n.º de personas en las cajas</label></div>
@@ -1543,6 +1565,10 @@ function renderPlaza(){
     }</select></div>
     ${tabla}
     <div class="btnrow"><button class="b" id="zCsv">Padrón en CSV</button></div>
+    ${A.length>1?`<p class="hint">El <b>año vigente</b> es la estructura aprobada: los anteriores salen
+      rotulados como históricos y los posteriores como propuesta. Un año anterior nuevo arranca como
+      copia del primero; marca ahí lo que era distinto (menos gente, o cargos que todavía no existían,
+      con <i>Existe desde</i>).</p>`:""}
     <p class="hint">${conDato} de ${nodos.length} unidades tienen el dato.
       El cuadro resumen y el CSV salen de esos números; las sumas siempre cierran contra el total.</p>`;
   const bind = (id, fn) => { const e = $(id); e.onchange = () => { fn(e.type==="checkbox" ? e.checked : e.value); refresh(); }; };
@@ -1552,7 +1578,9 @@ function renderPlaza(){
   $("#zCsv").onclick = exportCSV;
   document.querySelectorAll("[data-anio]").forEach(b => b.onclick = () => irAnio(+b.dataset.anio));
   $("#zMasAnio").onclick = agregarAnio;
-  if($("#zMenosAnio")) $("#zMenosAnio").onclick = quitarAnio;
+  $("#zAntesAnio").onclick = agregarAnioAnterior;
+  if($("#zQuitarAnio")) $("#zQuitarAnio").onclick = quitarAnioActual;
+  if($("#zVigente")) $("#zVigente").onchange = e => { snap(); S.cfg.anioVigente = +e.target.value; refresh(); };
   if($("#zCrec")) $("#zCrec").onchange = e => { c.verCrecimiento = e.target.checked; refresh(); };
   if($("#zColNvo")) $("#zColNvo").oninput = e => { c.colNuevoBorde = e.target.value;
     c.colNuevoFondo = mezcla(e.target.value, "#ffffff", .85); autosave(); renderCanvas(); };
@@ -1561,28 +1589,68 @@ function irAnio(a){
   S.cfg.anio = a;
   if(sel && !visibleEn(sel, a)) sel = null;
   refresh();
-  status(a > anioBase() ? `Viendo ${a}: organigrama propuesto` : `Viendo ${a}: estructura vigente`);
+  status("Viendo " + a + ": " + ({ historico:"estructura histórica",
+    vigente:"estructura vigente", propuesta:"organigrama propuesto" })[tipoAnio(a)]);
 }
 function agregarAnio(){
   snap();
   const A = aniosOrd();
+  if(!S.cfg.anioVigente) S.cfg.anioVigente = A[0];
   S.cfg.anios = A.concat([A[A.length-1] + 1]);
   irAnio(A[A.length-1] + 1);
 }
-function quitarAnio(){
+/* Agregar un año ANTERIOR: el nuevo pasa a ser el base, así que hay que anclar
+   el valor del que lo era. Si no, al editar el año nuevo el viejo lo seguiría
+   por arrastre y se reescribiría la historia sin tocarla. */
+function agregarAnioAnterior(){
+  const A = aniosOrd(), viejo = A[0], nuevo = viejo - 1;
+  if(A.indexOf(nuevo) >= 0) return;
+  snap();
+  if(!S.cfg.anioVigente) S.cfg.anioVigente = viejo;   /* el que era base sigue siendo el vigente */
+  Object.values(S.nodes).forEach(n => {
+    if(n.personas === null || n.personas === undefined || n.personas === "") return;
+    if(!n.plazasAnio) n.plazasAnio = {};
+    if(n.plazasAnio[String(viejo)] == null) n.plazasAnio[String(viejo)] = n.personas;
+  });
+  S.cfg.anios = [nuevo].concat(A);
+  irAnio(nuevo);
+  status(nuevo + " arranca como copia de " + viejo + ": marca ahí lo que era distinto");
+}
+/* Quita el año que estás viendo. Solo los extremos: sacar uno del medio dejaría
+   huecos en los arrastres y en las reasignaciones. */
+function quitarAnioActual(){
   const A = aniosOrd();
   if(A.length < 2) return;
-  const ult = A[A.length-1];
-  const usan = Object.values(S.nodes).filter(n => +n.desde === ult || +n.hasta === ult || (n.plazasAnio||{})[String(ult)] != null).length;
-  if(usan && !confirm(`${usan} unidad(es) tienen datos de ${ult}. ¿Quitar el año igual? Los datos de ${ult} se pierden.`)) return;
+  const y = anioAct(), esPrimero = y === A[0], esUltimo = y === A[A.length-1];
+  if(!esPrimero && !esUltimo){ status("Solo se puede quitar el primer o el último año"); return; }
+  const usan = Object.values(S.nodes).filter(n =>
+    +n.desde === y || +n.hasta === y || (n.plazasAnio||{})[String(y)] != null
+    || (n.parentAnio||{})[String(y)] != null).length;
+  if(usan && !confirm(usan + " unidad(es) tienen datos de " + y
+      + ". ¿Quitar el año igual? Esos datos se pierden.")) return;
   snap();
-  S.cfg.anios = A.slice(0, -1);
+  const quedan = A.filter(a => a !== y);
+  if(esPrimero){
+    /* el siguiente pasa a ser base: su valor deja plazasAnio y vuelve a personas,
+       que es donde vive el año base. Se calcula ANTES de cambiar la lista. */
+    const nb = quedan[0];
+    Object.values(S.nodes).forEach(n => {
+      const v = plazasEn(n, nb);
+      n.personas = (v === null ? null : v);
+      if(n.plazasAnio) Object.keys(n.plazasAnio).forEach(k => { if(+k <= nb) delete n.plazasAnio[k]; });
+      if(n.desde != null && n.desde !== "" && +n.desde <= nb) n.desde = null;
+      if(n.parentAnio) Object.keys(n.parentAnio).forEach(k => { if(+k <= nb) delete n.parentAnio[k]; });
+    });
+  }
   Object.values(S.nodes).forEach(n => {
-    if(+n.desde === ult) n.desde = null;
-    if(+n.hasta === ult) n.hasta = null;
-    if(n.plazasAnio) delete n.plazasAnio[String(ult)];
+    if(+n.desde === y) n.desde = null;
+    if(+n.hasta === y) n.hasta = null;
+    if(n.plazasAnio) delete n.plazasAnio[String(y)];
+    if(n.parentAnio) delete n.parentAnio[String(y)];
   });
-  irAnio(S.cfg.anios[S.cfg.anios.length-1]);
+  S.cfg.anios = quedan;
+  if(quedan.indexOf(+S.cfg.anioVigente) < 0) S.cfg.anioVigente = quedan[0];
+  irAnio(esPrimero ? quedan[0] : quedan[quedan.length - 1]);
 }
 function exportCSV(){
   layout();
@@ -1623,9 +1691,10 @@ function renderAudit(){
 }
 function renderAnios(){
   const A = aniosOrd();
+  const rotulo = { historico:" (histórico)", vigente:"", propuesta:" (propuesta)" };
   $("#selAnio").innerHTML = A.map(a =>
-    `<option value="${a}"${a===anioAct()?" selected":""}>${a}${a>anioBase()?" (propuesta)":""}</option>`).join("");
-  $("#selAnio").style.color = anioAct() > anioBase() ? S.cfg.colNuevoBorde : "";
+    `<option value="${a}"${a===anioAct()?" selected":""}>${a}${rotulo[tipoAnio(a)]}</option>`).join("");
+  $("#selAnio").style.color = tipoAnio() === "propuesta" ? S.cfg.colNuevoBorde : "";
 }
 function renderRels(){
   $("#relList").innerHTML = S.rel.length
@@ -1891,6 +1960,7 @@ function autosave(){
 function refresh(){
   _gate();
   renderCanvas(); renderAnios(); renderNode(); renderMeta(); renderPres(); renderColor(); renderPlaza(); renderAudit(); renderRels();
+  pintarDestino();   /* desvincular no pasa por marcar(): el destino se repinta aquí */
   $("#btUndo").disabled = !undoStack.length;
   $("#btRedo").disabled = !redoStack.length;
   autosave();
@@ -2581,6 +2651,28 @@ function pintarPildora(txt, tono){
   p.textContent = txt || "";
   p.className = tono || "";
   p.style.display = txt ? "" : "none";
+  pintarDestino();
+}
+/* Dónde se están escribiendo los cambios. Va en tres sitios a propósito: el
+   botón, el pie del panel y el título de la ventana, para que no haya que
+   acordarse ni abrir nada. */
+let TITULO0 = "";
+function pintarDestino(){
+  const h = PS.archivo(), d = $("#destino"), b = $("#btArchivo");
+  const corto = t => t.length > 17 ? t.slice(0, 16) + "\u2026" : t;
+  if(b){
+    b.textContent = h ? "Archivo: " + corto(h.name) : "Archivo\u2026";
+    b.title = h
+      ? "Los cambios se escriben en " + h.name + ". Clic para recargar, desvincular o restaurar un respaldo."
+      : "Sin archivo vinculado: los cambios se guardan solo en este navegador. Clic para vincular uno.";
+    b.classList.toggle("on", !!h);
+  }
+  if(d){
+    d.innerHTML = h
+      ? 'Guardando en<span class="arch">' + esc(h.name) + '</span>y en este navegador.'
+      : 'Guardando <b>solo en este navegador</b>.<br>Con <b>Archivo\u2026</b> lo vinculas a tu .org.json del disco.';
+  }
+  try { document.title = (h ? h.name + " \u2014 " : "") + TITULO0; } catch(e){}
 }
 const PS = crearPersistencia({
   clave:        LS_KEY,
@@ -2755,6 +2847,8 @@ function init(){
   $("#btTheme").onclick = () => setTheme(document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark");
   $("#foot").innerHTML = `<b>${APP.nombre}</b> ${APP.version}`;
 
+  TITULO0 = document.title;
+  pintarDestino();
   let th = "light";
   try { th = localStorage.getItem(LS_THEME) || "light"; } catch(e){}
   setTheme(th);

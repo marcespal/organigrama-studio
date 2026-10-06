@@ -52,6 +52,17 @@ estructural.
 Un mismo archivo guarda la estructura de todos los años. El selector **Año** de la barra cambia lo
 que se ve y lo que se edita; con el botón **+** se agrega el año siguiente.
 
+- **Años anteriores y posteriores.** En el panel Plantilla, los botones a cada lado de la fila de
+  años agregan el siguiente o uno anterior. Un año anterior **arranca como copia del primero**: solo
+  marcas ahí lo que era distinto (menos gente, o cargos que aún no existían, con *Existe desde*).
+  Al agregarlo, los valores del año que dejaba de ser el primero quedan anclados, así que editar el
+  año nuevo no mueve los que ya tenías.
+- **Año vigente**: cuál de todos es la estructura aprobada. Los anteriores se rotulan como
+  *históricos* y los posteriores como *propuesta*, en el selector de la barra y en el cajetín. Antes
+  esto era el primer año de la lista; dejó de serlo en cuanto se pudo agregar historia.
+- **Quitar un año**: el botón quita el que estás viendo, y solo si es el primero o el último — sacar
+  uno del medio dejaría huecos en los arrastres y en las reasignaciones. Si quitas el primero, el
+  siguiente vuelve a ser el base con sus propios valores.
 - **Existe desde / Existe hasta** por unidad: las que todavía no existen no se dibujan en los años
   anteriores, y las dadas de baja desaparecen del año siguiente al que declares.
 - **N.º de personas es por año**, con arrastre: declaras 2 en 2026 y 4 en 2027, y los años sin dato
@@ -241,6 +252,10 @@ Para el PDF: botón **PDF** y en el diálogo del navegador elegir "Guardar como 
 La herramienta aplica el patrón de **[persistencia segura](https://github.com/marcespal/persistencia-segura-html)**:
 el módulo va incrustado en el archivo, así que sigue siendo un solo HTML.
 
+- **Siempre a la vista a dónde van los cambios**: el botón dice `Archivo: nombre.org.json` cuando
+  hay uno vinculado (y se resalta), el pie del panel derecho lo repite completo, y el nombre va
+  también en el título de la ventana. Sin archivo, dice que estás guardando solo en el navegador.
+  Si una guarda desvincula el archivo para protegerlo, el botón vuelve solo a `Archivo…`.
 - **Autoguardado en el navegador** en cada cambio. La píldora de la barra dice en qué estado está:
   *Cambios sin guardar…* → *Guardado en el navegador*.
 - **Archivo vinculado** (botón `Archivo…`, en Chrome o Edge): eliges tu `.org.json` y a partir de
