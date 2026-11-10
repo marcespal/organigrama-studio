@@ -1679,6 +1679,10 @@ function quitarAnioActual(){
   Object.values(S.nodes).forEach(n => {
     if(+n.desde === y) n.desde = null;
     if(+n.hasta === y) n.hasta = null;
+    /* "Existe hasta" el nuevo último año era una baja que ocurría en el año
+       quitado: si no se anula, al volver a crear ese año el cargo no aparece y
+       se lleva a todo su equipo. */
+    if(esUltimo && +n.hasta === quedan[quedan.length-1]) n.hasta = null;
     if(n.plazasAnio) delete n.plazasAnio[String(y)];
     if(n.parentAnio) delete n.parentAnio[String(y)];
   });
