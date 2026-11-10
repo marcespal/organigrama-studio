@@ -506,10 +506,34 @@ function totalArea(id){
 }
 const totalGeneral = () => { const y = anioAct();
   return Object.values(S.nodes).reduce((a,n) => a + (visibleEn(n.id, y) ? plazasProp(n) : 0), 0); };
+/* ¿cambió de nombre respecto del año anterior? (un cargo nuevo no cuenta) */
+function renombradaEn(n, y){
+  y = (y == null ? anioAct() : y);
+  const p = anioPrev(y);
+  return p != null && !esNueva(n, y) && visibleEn(n.id, p) && tituloEn(n, p) !== tituloEn(n, y);
+}
+/* Por qué está marcada una caja: va en el tooltip, uno por línea. */
+function motivosCambio(n){
+  const y = anioAct(), p = anioPrev(y), M = [];
+  if(!S.cfg.verCrecimiento || p == null) return M;
+  const pers = v => v + (Math.abs(v) === 1 ? " persona" : " personas");
+  if(esNueva(n)){
+    const v = plazasProp(n);
+    M.push("Cargo nuevo en " + y + (v ? " (" + pers(v) + ")" : ""));
+    return M;
+  }
+  if(!visibleEn(n.id, p)) return M;
+  const d = deltaEn(n);
+  if(d) M.push((d > 0 ? "+" : "") + pers(d) + ": " + plazasEn(n, p) + " en " + p + " \u2192 " + plazasEn(n, y) + " en " + y);
+  if(reasignadaEn(n)) M.push("Cambia de jefe: antes " + (tituloEn(S.nodes[padreEn(n.id, p)], p) || "\u2014")
+    + ", ahora " + (nomAnio(S.nodes[padreEn(n.id, y)]) || "\u2014"));
+  if(renombradaEn(n)) M.push("Cambio de nombre del cargo: antes \u00ab" + tituloEn(n, p) + "\u00bb");
+  return M;
+}
 function crecimiento(y){
   y = (y == null ? anioAct() : y);
   const p = anioPrev(y);
-  const r = { prev:p, nuevas:0, plazasNuevas:0, ampliadas:0, reducidas:0, bajas:0, reasignadas:0, total:totalGeneral() };
+  const r = { prev:p, nuevas:0, plazasNuevas:0, ampliadas:0, reducidas:0, bajas:0, reasignadas:0, renombradas:0, total:totalGeneral() };
   if(p == null) return r;
   Object.values(S.nodes).forEach(n => {
     const hoy = visibleEn(n.id, y), antes = visibleEn(n.id, p);
@@ -517,6 +541,7 @@ function crecimiento(y){
     if(!hoy && antes){ r.bajas++; return; }
     if(!hoy) return;
     if(reasignadaEn(n, y)) r.reasignadas++;
+    if(renombradaEn(n, y)) r.renombradas++;
     const d = deltaEn(n, y);
     if(d > 0) r.ampliadas += d; else if(d < 0) r.reducidas += -d;
   });
@@ -850,7 +875,7 @@ function layout(){
     const ars = areasDeclaradas();
     const crec = c.verCrecimiento && anioPrev() != null;
     if(usados.length || ars.length) LEY = { x: b.x, y: b.y2 + 34, w: 258,
-      h: 26 + usados.length*17 + (nota ? 30 : 0) + (crec ? 50 : 0) + (ars.length ? 22 + ars.length*15 : 0),
+      h: 26 + usados.length*17 + (nota ? 30 : 0) + (crec ? 66 : 0) + (ars.length ? 22 + ars.length*15 : 0),
       rels: usados, nota: nota, areas: ars, crec: crec };
   }
 }
@@ -869,7 +894,8 @@ function resumenFilas(){
     if(g.reducidas) F.push({ t:"r", k:"Reducción de plazas", v:"-" + g.reducidas, p:"" });
     if(g.bajas) F.push({ t:"r", k:g.bajas + " cargo(s) dado(s) de baja", v:"", p:"" });
     if(g.reasignadas) F.push({ t:"r", k:g.reasignadas + " cargo(s) cambian de dependencia", v:"", p:"" });
-    if(!g.nuevas && !g.ampliadas && !g.reducidas && !g.bajas && !g.reasignadas)
+    if(g.renombradas) F.push({ t:"r", k:g.renombradas + " cargo(s) cambian de nombre", v:"", p:"" });
+    if(!g.nuevas && !g.ampliadas && !g.reducidas && !g.bajas && !g.reasignadas && !g.renombradas)
       F.push({ t:"r", k:"Sin cambios frente a " + g.prev, v:"", p:"" });
   }
   if(c.resumenPor !== "categoria"){
@@ -1057,8 +1083,11 @@ function nodosSVG(){
     /* crecimiento del año activo: cargo nuevo y plazas adicionales */
     const nueva = c.verCrecimiento && anioPrev() != null && esNueva(n);
     if(s.izq) sel2 += selloSVG(p.x + 4, p.y + 4, s.izq, s.izqCls);
-    out += `<g class="${cls}" data-id="${id}">`
-      + `<rect class="bx${nueva ? " nv" : ""}" x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="${c.r}" fill="${fill}"/>`
+    const renom = c.verCrecimiento && anioPrev() != null && renombradaEn(n);
+    const mot = motivosCambio(n);
+    const ayuda = mot.length ? `<title>${esc("Marcado por cambios frente a " + anioPrev() + ":\n\u2022 " + mot.join("\n\u2022 "))}</title>` : "";
+    out += `<g class="${cls}" data-id="${id}">` + ayuda
+      + `<rect class="bx${nueva ? " nv" : renom ? " rn" : ""}" x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="${c.r}" fill="${fill}"/>`
       + txt + sel2
       + `<rect class="selr" x="${p.x-4}" y="${p.y-4}" width="${p.w+8}" height="${p.h+8}" rx="${c.r+2}"/>`
       + `</g>`;
@@ -1131,10 +1160,12 @@ function cajetinSVG(){
            + `<rect x="${LEY.x+8}" y="${y+8}" width="44" height="12" rx="2" fill="none" stroke="${S.cfg.colNuevoBorde}" stroke-width="2.4"/>`
            + `<text class="cv2" x="${LEY.x+60}" y="${y+18.5}">Cargo nuevo en ${anioAct()}</text>`
            + `<path d="M${LEY.x+8} ${y+30} H${LEY.x+52}"${trazo("mando", true)}/>`
-           + `<text class="cv2" x="${LEY.x+60}" y="${y+33.5}">Cambia de dependencia en ${anioAct()}</text>`;
+           + `<text class="cv2" x="${LEY.x+60}" y="${y+33.5}">Cambia de dependencia en ${anioAct()}</text>`
+           + `<rect x="${LEY.x+8}" y="${y+40}" width="44" height="12" rx="2" fill="none" stroke="${S.cfg.colNuevoBorde}" stroke-width="2.4" stroke-dasharray="7 4"/>`
+           + `<text class="cv2" x="${LEY.x+60}" y="${y+50.5}">Cambia de nombre en ${anioAct()}</text>`;
     }
     if(LEY.areas && LEY.areas.length){
-      let y = LEY.y + 30 + LEY.rels.length*17 + (LEY.nota ? 30 : 0) + (LEY.crec ? 50 : 0) + 8;
+      let y = LEY.y + 30 + LEY.rels.length*17 + (LEY.nota ? 30 : 0) + (LEY.crec ? 66 : 0) + 8;
       out += `<text class="ck" x="${LEY.x+8}" y="${y}">ÁREAS</text>`;
       LEY.areas.forEach((n,i) => {
         const yy = y + 15 + i*15;
@@ -1162,6 +1193,7 @@ function svgCSS(){
 .sl.ac{fill:none;stroke-dasharray:2.5 2}
 .st{font:600 9.5px "Segoe UI",system-ui,Arial,sans-serif;fill:${c.colTexto};text-anchor:middle}
 .nd .bx.nv{stroke:${c.colNuevoBorde};stroke-width:2.4}
+.nd .bx.rn{stroke:${c.colNuevoBorde};stroke-width:2.4;stroke-dasharray:7 4}
 .sl.nv{fill:${c.colNuevoFondo};stroke:${c.colNuevoBorde};stroke-width:1}
 .st.nv{fill:${c.colNuevoBorde};font-weight:700}
 .sl.men{fill:none;stroke:${mezcla(c.colTexto,"#ffffff",.55)};stroke-dasharray:2 2}

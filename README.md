@@ -62,7 +62,10 @@ que se ve y lo que se edita; con el botón **+** se agrega el año siguiente.
   esto era el primer año de la lista; dejó de serlo en cuanto se pudo agregar historia.
 - **El nombre del cargo es por año**, como las plazas: si lo cambias en 2027 aplica desde 2027 en
   adelante y 2026 conserva el anterior. Bajo el campo se ve *"En 2026 se llamaba …"*. Si vuelves a
-  escribir el nombre del año anterior, el cambio desaparece.
+  escribir el nombre del año anterior, el cambio desaparece. En el dibujo, el cargo renombrado lleva el borde
+  naranja **punteado** (el continuo es *cargo nuevo*).
+- **Al pasar el cursor** sobre una caja marcada aparece el motivo frente al año anterior: cargo
+  nuevo, personas que se suman o se quitan, cambio de jefe o cambio de nombre.
 - **Un año histórico es una foto**: lo que cambias ahí se queda ahí. Las plazas, los nombres y las
   reasignaciones anclan el valor del año siguiente antes de cambiar, y un cargo creado en un año
   histórico nace con *Existe hasta* ese mismo año. El titular y los colores sí son de la unidad en
