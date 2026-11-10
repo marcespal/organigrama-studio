@@ -268,10 +268,17 @@ el módulo va incrustado en el archivo, así que sigue siendo un solo HTML.
   hay uno vinculado (y se resalta), el pie del panel derecho lo repite completo, y el nombre va
   también en el título de la ventana. Sin archivo, dice que estás guardando solo en el navegador.
   Si una guarda desvincula el archivo para protegerlo, el botón vuelve solo a `Archivo…`.
+- **Guardar ≠ Descargar copia.** `Guardar` (Ctrl+S) es *en tu archivo*: si hay uno vinculado
+  escribe en el acto; si quedó en espera tras recargar, se llama `Reconectar` y con un clic vuelve
+  a guardarse solo; si nunca vinculaste uno, pregunta dónde crear el `.org.json`. Sin archivo, el
+  botón se resalta en naranja. `Descargar copia` baja la versión de ese momento con fecha y hora en
+  el nombre, sin cambiar dónde se guarda el trabajo.
 - **Autoguardado en el navegador** en cada cambio. La píldora de la barra dice en qué estado está:
-  *Cambios sin guardar…* → *Guardado en el navegador*.
-- **Archivo vinculado** (botón `Archivo…`, en Chrome o Edge): eliges tu `.org.json` y a partir de
-  ahí cada cambio se escribe también en el disco. Es lo que sobrevive a que se borren los datos del
+  *Cambios sin guardar…* → *Guardado en archivo.org.json*, o *Solo en el navegador* (en naranja)
+  mientras no haya archivo.
+- **Archivo vinculado** (en Chrome o Edge): eliges tu `.org.json` y a partir de ahí cada cambio se
+  escribe también en el disco. Al recargar la página el navegador pide permiso otra vez: por eso
+  el botón pasa a `Reconectar`. Si el archivo coincide con la pantalla, reconecta sin preguntar. Es lo que sobrevive a que se borren los datos del
   navegador o a que muevas la herramienta de carpeta — el caso en el que `localStorage` desaparece
   sin que nada falle visiblemente.
 - **Respaldos**: las 3 versiones anteriores a cada escritura, en IndexedDB, restaurables desde el

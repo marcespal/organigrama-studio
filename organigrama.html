@@ -169,6 +169,8 @@ html[data-theme="dark"] #pill.warn{background:#2a2113;color:#f0c07a;border-color
 #crashLayer .chelp{color:#666;font-size:12.5px}
 #crashLayer button{margin-top:8px;padding:6px 18px;border:1px solid #adadad;background:#e1e1e1;
   border-radius:3px;cursor:pointer}
+.b.alerta{border-color:#c2410c;color:#c2410c;font-weight:600;background:#fff7ed}
+html[data-theme="dark"] .b.alerta{background:#2a1a10;color:#fdba74;border-color:#c2410c}
 </style>
 </head>
 <body>
@@ -179,7 +181,8 @@ html[data-theme="dark"] #pill.warn{background:#2a2113;color:#f0c07a;border-color
       <button class="b" id="btNew" title="Empezar en blanco">Nuevo</button>
       <button class="b" id="btDemo" title="Cargar organigrama de ejemplo">Ejemplo</button>
       <button class="b" id="btOpen" title="Abrir .org.json">Abrir</button>
-      <button class="b" id="btSave" title="Descargar .org.json">Guardar</button>
+      <button class="b" id="btSave" title="Guardar en tu archivo .org.json (Ctrl+S)">Guardar</button>
+      <button class="b" id="btCopia" title="Descargar una copia de la versión actual, sin cambiar dónde se guarda">Descargar copia</button>
       <button class="b" id="btArchivo" title="Vincular un archivo del disco, recargar o restaurar un respaldo">Archivo…</button>
       <input type="file" id="fileIn" accept=".json,.org.json" style="display:none">
     </div>
@@ -1945,9 +1948,37 @@ function bajar(nombre, blob){
   a.href = u; a.download = nombre; document.body.appendChild(a); a.click();
   setTimeout(() => { URL.revokeObjectURL(u); a.remove(); }, 400);
 }
+/* Descargar una copia: la versión de este momento, con la fecha en el nombre.
+   No cambia dónde se guarda el trabajo. */
 function guardarJSON(){
-  bajar(slug() + ".org.json", new Blob([JSON.stringify(S, null, 2)], { type:"application/json" }));
-  status("Archivo .org.json descargado");
+  const f = new Date(), dd = n => String(n).padStart(2, "0");
+  const sello = f.getFullYear() + "-" + dd(f.getMonth() + 1) + "-" + dd(f.getDate()) + "-" + dd(f.getHours()) + dd(f.getMinutes());
+  bajar(slug() + "-copia-" + sello + ".org.json", new Blob([JSON.stringify(S, null, 2)], { type:"application/json" }));
+  status("Copia descargada; el trabajo se sigue guardando donde estaba");
+}
+/* Guardar = en tu archivo. Si está vinculado escribe ya; si quedó en espera
+   tras recargar, lo reconecta; si no hay ninguno, pregunta dónde crearlo. */
+async function guardarAhora(){
+  const h = PS.archivo(), pend = PS.pendiente();
+  if(h){
+    PS.guardarLocal();
+    const ok = await PS.guardarArchivo();
+    status(ok ? "Guardado en " + h.name : "No se pudo escribir " + h.name);
+    if(!ok) pintarPildora("No se pudo escribir el archivo", "warn");
+    return;
+  }
+  if(pend){
+    const r = await PS.reconectarPendiente();
+    if(r && r.ok){ fitView(); status("Reconectado: cada cambio se guarda en " + PS.archivo().name); }
+    else if(r && r.motivo === "sin-permiso") status("Sin permiso no se puede escribir en " + pend.name);
+    return;
+  }
+  if(window.showSaveFilePicker){
+    const r = await PS.archivoNuevo();
+    if(r && r.ok) status("Desde ahora cada cambio se guarda en " + PS.archivo().name);
+    return;
+  }
+  guardarJSON();     /* sin acceso a archivos (Firefox, Safari): solo queda descargar */
 }
 function abrirJSON(txt){
   try {
@@ -2204,7 +2235,7 @@ function initEventos(){
     }
     if(ev.ctrlKey && (ev.key === "z" || ev.key === "Z")){ ev.preventDefault(); undo(); return; }
     if(ev.ctrlKey && (ev.key === "y" || ev.key === "Y")){ ev.preventDefault(); redo(); return; }
-    if(ev.ctrlKey && (ev.key === "s" || ev.key === "S")){ ev.preventDefault(); guardarJSON(); return; }
+    if(ev.ctrlKey && (ev.key === "s" || ev.key === "S")){ ev.preventDefault(); guardarAhora(); return; }
     if(ev.key === "Delete"){ ev.preventDefault(); borrar(); return; }
     if(ev.key === "Tab"){ ev.preventDefault(); agregar("linea", false); return; }
     if(ev.key === "Enter"){ ev.preventDefault(); agregar("linea", true); return; }
@@ -2533,7 +2564,24 @@ function crearPersistencia(cfg) {
     let h;
     try { [h] = await global.showOpenFilePicker({ types: C.tiposArchivo, multiple: false }); }
     catch (e) { return { ok: false, motivo: "cancelado" }; }
+    return vincularHandle(h);
+  }
 
+  /* Reconectar el archivo recordado. Tras recargar, el navegador pide permiso
+     otra vez y eso exige un clic: sin esta función la única salida era volver
+     a buscarlo con el selector, y mientras tanto todo se guardaba solo en el
+     navegador sin que nadie lo notara. Se llama desde un clic del usuario. */
+  async function reconectarPendiente() {
+    const h = handlePendiente;
+    if (!h) return { ok: false, motivo: "sin-pendiente" };
+    if (!await permisoEscritura(h)) {
+      C.marcar("Sin permiso para " + h.name, "warn");
+      return { ok: false, motivo: "sin-permiso" };
+    }
+    return vincularHandle(h);
+  }
+
+  async function vincularHandle(h) {
     let d = null, fallo = false;
     try { d = await leerJSONde(h); } catch (e) { fallo = true; }
 
@@ -2549,7 +2597,10 @@ function crearPersistencia(cfg) {
     let escribir = true;
     if (d) {
       let cargar = true;
-      if (!C.estadoVacio()) {
+      const clave = x => C.clavePorContenido ? C.clavePorContenido(x) : JSON.stringify(x);
+      if (!C.estadoVacio() && clave(d) === clave(C.estado())) {
+        cargar = false; escribir = false;      /* son iguales: no hay nada que preguntar */
+      } else if (!C.estadoVacio()) {
         cargar = global.confirm(
           "El archivo contiene " + C.resumen(d) + ".\n\n" +
           "Aceptar: cargar el archivo y reemplazar lo que tienes en pantalla.\n" +
@@ -2738,7 +2789,7 @@ function crearPersistencia(cfg) {
     /* guardado */
     tocar, guardarLocal, restaurarLocal, guardarArchivo, descargar,
     /* archivo */
-    vincular, archivoNuevo, recargarDesdeArchivo, reconectarRecordado,
+    vincular, archivoNuevo, recargarDesdeArchivo, reconectarRecordado, reconectarPendiente,
     desvincular: async () => { fileHandle = null; await olvidarHandle(); C.render(); },
     /* respaldos */
     respaldos, respaldar,
@@ -2783,6 +2834,10 @@ function aplicarEstado(d){
 function pintarPildora(txt, tono){
   const p = $("#pill");
   if(!p) return;
+  /* sin archivo, "guardado" en verde engaña: borrar los datos del navegador lo pierde */
+  if(txt === "Guardado en el navegador" && !PS.archivo() && window.showSaveFilePicker){
+    txt = PS.pendiente() ? "Solo en el navegador \u2014 falta reconectar" : "Solo en el navegador"; tono = "warn";
+  }
   p.textContent = txt || "";
   p.className = tono || "";
   p.style.display = txt ? "" : "none";
@@ -2802,10 +2857,21 @@ function pintarDestino(){
       : "Sin archivo vinculado: los cambios se guardan solo en este navegador. Clic para vincular uno.";
     b.classList.toggle("on", !!h);
   }
+  const pend = PS.pendiente(), api = !!window.showSaveFilePicker, s = $("#btSave");
+  if(s){
+    s.textContent = h ? "Guardar" : pend ? "Reconectar" : api ? "Guardar en archivo\u2026" : "Guardar";
+    s.title = h ? "Guardar ahora en " + h.name + " (además se guarda solo con cada cambio) \u00b7 Ctrl+S"
+      : pend ? "Volver a guardar en " + pend.name + ": tras recargar, el navegador pide permiso otra vez"
+      : api ? "Elegir dónde crear el .org.json; desde ahí cada cambio se guarda solo"
+      : "Descargar el .org.json (este navegador no puede escribir en archivos)";
+    s.classList.toggle("alerta", !h && api);
+  }
   if(d){
     d.innerHTML = h
       ? 'Guardando en<span class="arch">' + esc(h.name) + '</span>y en este navegador.'
-      : 'Guardando <b>solo en este navegador</b>.<br>Con <b>Archivo\u2026</b> lo vinculas a tu .org.json del disco.';
+      : pend
+      ? 'Guardando <b>solo en este navegador</b>.<br><b>' + esc(pend.name) + '</b> espera tu permiso: pulsa <b>Reconectar</b>.'
+      : 'Guardando <b>solo en este navegador</b>.<br>Con <b>Guardar en archivo\u2026</b> eliges el .org.json y desde ahí se guarda solo.';
   }
   try { document.title = (h ? h.name + " \u2014 " : "") + TITULO0; } catch(e){}
 }
@@ -2846,7 +2912,8 @@ function archivoHTML(bks){
     x += '<p>Ahora mismo el organigrama vive solo en este navegador. Si vinculas un archivo, '
       +  'cada cambio se escribe ademas en tu <b>.org.json</b> del disco, que es lo que sobrevive '
       +  'a que se borren los datos del navegador o a que muevas la herramienta de carpeta.</p>';
-    if(pend) x += '<p><b>' + esc(pend.name) + '</b> quedo recordado, pero necesita que le des permiso otra vez.</p>';
+    if(pend) x += '<p><b>' + esc(pend.name) + '</b> quedo recordado, pero necesita que le des permiso otra vez.</p>'
+      +  '<div class="btnrow"><button class="b on" id="arReconectar">Reconectar ' + esc(pend.name) + '</button></div>';
     x += '<div class="btnrow"><button class="b" id="arVincular">Vincular un .org.json</button>'
       +  '<button class="b" id="arNuevo">Crear un archivo nuevo</button></div>';
   }
@@ -2875,6 +2942,7 @@ async function abrirArchivoModal(){
   const bks = await PS.respaldos();
   modal("Archivo y respaldos", archivoHTML(bks));
   const tras = r => { closeModal(); if(r && r.ok) fitView(); };
+  if($("#arReconectar")) $("#arReconectar").onclick = async () => tras(await PS.reconectarPendiente());
   if($("#arVincular")) $("#arVincular").onclick = async () => tras(await PS.vincular());
   if($("#arOtro"))     $("#arOtro").onclick     = async () => tras(await PS.vincular());
   if($("#arNuevo"))    $("#arNuevo").onclick    = async () => tras(await PS.archivoNuevo());
@@ -2936,6 +3004,7 @@ function listo(){
   arrancando = false;
   fitView();
   if(!PS.almacenDisponible()) pintarPildora("Sin autoguardado - descarga el JSON", "warn");
+  else if(!PS.archivo() && PS.pendiente()) pintarPildora("Falta reconectar " + PS.pendiente().name, "warn");
   else if(PS.localIlegible()){
     pintarPildora("Autoguardado en pausa", "warn");
     modal("No se pudo leer lo guardado", '<div class="abox">'
@@ -2963,7 +3032,8 @@ function init(){
     r.onload = () => abrirJSON(r.result);
     r.readAsText(f); ev.target.value = "";
   };
-  $("#btSave").onclick = guardarJSON;
+  $("#btSave").onclick = guardarAhora;
+  $("#btCopia").onclick = guardarJSON;
   $("#btSvg").onclick = exportSVG;
   $("#btCsv").onclick = exportCSV;
   $("#selAnio").onchange = e => irAnio(+e.target.value);
