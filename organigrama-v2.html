@@ -1253,13 +1253,15 @@ function auditar(){
   if(!m.titulo.trim()) W("El organigrama no tiene título.");
 
   const nodos = Object.values(S.nodes);
-  const sinNombre = nodos.filter(n => !nomAnio(n).trim()).length;
+  /* lo que existe en el año que se ve: un cargo que nace en 2027 no le falta nada en 2026 */
+  const vivos = nodos.filter(n => visibleEn(n.id, anioAct()));
+  const sinNombre = vivos.filter(n => !nomAnio(n).trim()).length;
   if(sinNombre) E(`${sinNombre} unidad(es) sin nombre. El criterio de precisión exige definir todas las unidades con exactitud.`);
 
   /* solo es ambiguo si dos unidades con el mismo nombre dependen del mismo jefe;
      que "Preparador Físico" se repita en varios equipos es correcto */
   const vistos = {}, dup = [];
-  nodos.forEach(n => {
+  vivos.forEach(n => {
     const k = (n.parent || "-") + "|" + nomAnio(n).trim().toLowerCase();
     if(!nomAnio(n).trim()) return;
     if(vistos[k]) { if(dup.indexOf(nomAnio(n)) < 0) dup.push(nomAnio(n)); } else vistos[k] = 1;
@@ -1267,14 +1269,14 @@ function auditar(){
   if(dup.length) W("Unidades con el mismo nombre bajo el mismo jefe: " + dup.slice(0,4).map(esc).join(", ")
     + ". Ahí sí hay ambigüedad: distínguelas (por categoría, equipo o especialidad).");
 
-  const tramos = nodos.map(n => ({ n, k: kidsTree(n.id).length })).filter(x => x.k > c.tramoMax);
+  const tramos = vivos.map(n => ({ n, k: kidsTree(n.id).length })).filter(x => x.k > c.tramoMax);
   if(tramos.length) W(`Tramo de control amplio (más de ${c.tramoMax} subordinados directos) en: `
     + tramos.slice(0,3).map(x => esc(nomAnio(x.n)) + " (" + x.k + ")").join(", ") + ". Considera agrupar por departamentalización.");
 
   const prof = Math.max.apply(null, Object.values(P).map(p => p.d)) + 1;
   if(prof > c.nivelMax) W(`${prof} niveles jerárquicos. Por sencillez conviene no pasar de ${c.nivelMax}; los niveles de más se representan en un organigrama específico.`);
 
-  const malAdscritos = nodos.filter(n => {
+  const malAdscritos = vivos.filter(n => {
     if(["consejo","comision","comisionIS"].indexOf(n.tipo) < 0 || !n.parent) return false;
     const p = P[n.parent];
     return p && p.d > 1;
@@ -1282,33 +1284,39 @@ function auditar(){
   if(malAdscritos.length) E("Consejos y comisiones permanentes deben ir <b>adscritos al órgano de dirección</b>, no a unidades operativas: "
     + malAdscritos.slice(0,3).map(n => esc(nomAnio(n))).join(", ") + ".");
 
-  const staffConLinea = nodos.filter(n => !TIPOS[n.tipo].arbol && kidsTree(n.id).length);
+  const staffConLinea = vivos.filter(n => !TIPOS[n.tipo].arbol && kidsTree(n.id).length);
   if(staffConLinea.length) E("Una unidad de asesoría o apoyo no debe tener unidades de línea subordinadas: "
     + staffConLinea.slice(0,3).map(n => esc(nomAnio(n))).join(", ") + ".");
 
-  const desbordan = nodos.filter(n => plan(n).h > c.h - 6);
+  const desbordan = vivos.filter(n => plan(n).h > c.h - 6);
   if(desbordan.length) W(`${desbordan.length} caja(s) con el texto desbordado. Como todas las cajas deben medir igual, sube el <b>alto de caja</b> o acorta los nombres — no cambies el tamaño de una sola.`);
 
   if(c.g < 1.4) W("La línea de mando está muy fina: debe ser claramente la más gruesa del organigrama.");
   const cont = contraste(c.colTexto, c.porNivel ? c.nivel[0] : c.colFondo);
   if(cont < 4.5) W(`Contraste texto/fondo bajo (${cont.toFixed(1)}:1). Sube a 4.5:1 para que se lea impreso.`);
 
-  const propios = nodos.filter(n => n.color);
+  const propios = vivos.filter(n => n.color);
   if(propios.length && c.uniformidad) W(`${propios.length} caja(s) con color propio con la uniformidad activada. Rompe la homogeneidad de figuras; usa el color por nivel o desactiva el candado.`);
 
   const tot = totalGeneral();
   if(tot > 0){
     if(m.contenido !== "puestos") W("Estás consignando el número de personas: por su contenido, este es un organigrama <b>de puestos y plazas</b>. Ajusta el campo Contenido del cajetín.");
-    const sinDato = nodos.filter(n => !tienePlazas(n)).length;
+    const sinDato = vivos.filter(n => !tienePlazas(n)).length;
     if(sinDato) W(`${sinDato} unidad(es) sin n.º de personas: el resumen las cuenta como 0 y el total puede quedar corto.`);
     G(`Plantilla declarada: ${tot} personas. Los acumulados por área cierran contra ese total.`);
   }
   if(aniosOrd().length > 1 && tipoAnio() === "propuesta"){
     const t = (m.titulo + " " + m.subtitulo).toLowerCase();
-    if(t.indexOf("propuest") < 0 && t.indexOf("proyect") < 0 && t.indexOf("plan") < 0)
+    /* El título y el subtítulo son de todos los años: exigir "propuesta" ahí
+       rotularía también el vigente. Basta con que el cajetín, que sí es por
+       año, se vea en el dibujo. */
+    if(t.indexOf("propuest") >= 0 || t.indexOf("proyect") >= 0 || t.indexOf("plan") >= 0){ /* ya lo dice */ }
+    else if(c.verCajetin)
+      G(`El cajetín rotula <b>${anioAct()}</b> como PROPUESTA: se distingue del organigrama vigente.`);
+    else
       W(`Estás viendo <b>${anioAct()}</b>, que es estructura proyectada, no aprobada. La doctrina distingue el
-        organigrama real del <b>propuesto</b>: pon "propuesta ${anioAct()}" en el título o el subtítulo antes de
-        entregarlo. El cajetín ya lo marca como PROPUESTA.`);
+        organigrama real del <b>propuesto</b>: activa el cajetín (lo rotula como PROPUESTA) o pon
+        "propuesta ${anioAct()}" en el subtítulo antes de entregarlo.`);
     const arrastre = nodos.filter(n => n.hasta && hijosTodoAnio(n.id).some(x =>
       !x.hasta && !reasignadaEn(x, +n.hasta + 1) && padreEn(x.id, +n.hasta + 1) === n.id));
     if(arrastre.length) W(`Al terminar ${arrastre.slice(0,2).map(n => esc(nomAnio(n)) + " (" + n.hasta + ")").join(", ")},
@@ -1323,7 +1331,7 @@ function auditar(){
     if(huerfanas.length) E(`${huerfanas.length} unidad(es) de este año dependen de una unidad que no existe en ${anioAct()}
       (${huerfanas.slice(0,3).map(n => esc(nomAnio(n))).join(", ")}): no se dibujan. Reasígnalas al jefe que sí existe ese año.`);
   }
-  const realineadas = nodos.filter(n => n.nivelVisual !== null && n.nivelVisual !== undefined && n.nivelVisual !== "");
+  const realineadas = vivos.filter(n => n.nivelVisual !== null && n.nivelVisual !== undefined && n.nivelVisual !== "");
   if(realineadas.length){
     const rotuladas = (c.bandas || []).some(x => (x||"").trim()) && c.verBandas;
     if(rotuladas) G(`${realineadas.length} unidad(es) alineadas a su banda de rango, con las bandas rotuladas: la altura se lee como nivel de puesto, no como profundidad de dependencia.`);
@@ -1336,7 +1344,7 @@ function auditar(){
   if(ars.length && !c.verLeyenda) W(`Hay ${ars.length} área(s) coloreadas pero la simbología está oculta.
     Actívala para que el color quede declarado; si no, es decoración que el lector tiene que adivinar.`);
   else if(ars.length) G(`${ars.length} área(s) diferenciadas por color y declaradas en la simbología.`);
-  const escal = nodos.filter(n => desnivelDe(n.id) > 0);
+  const escal = vivos.filter(n => desnivelDe(n.id) > 0);
   if(escal.length){
     W(`${escal.length} unidad(es) escalonadas respecto de sus pares (${escal.slice(0,3).map(n => esc(nomAnio(n))).join(", ")}).
       Comunica antigüedad o grado, pero la lectura normativa asocia la <b>altura al nivel jerárquico</b>: para un estatuto
