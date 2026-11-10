@@ -378,7 +378,7 @@ const RELS = {
 function nodo(id, parent, tipo, titulo, ord){
   return { id, parent, tipo, titulo, titular:"", funciones:[], lado:"L", ord:ord||0, color:"",
            personas:null, categoria:"", desnivel:0, nivelVisual:null, areaColor:"",
-           desde:null, hasta:null, plazasAnio:{}, parentAnio:{} };
+           desde:null, hasta:null, plazasAnio:{}, parentAnio:{}, tituloAnio:{} };
 }
 /* ============================ AÑOS DEL PLAN ==============================
    Un solo archivo guarda la estructura de todos los años. Cada unidad declara
@@ -450,6 +450,29 @@ function anioSig(y){
   return i >= 0 && i < a.length - 1 ? a[i+1] : null;
 }
 const esHistorico = y => tipoAnio(y) === "historico";
+/* El nombre también es por año: se declara en el año en que cambia y se
+   arrastra hacia adelante, como las plazas. n.titulo es el del año base. */
+function tituloEn(n, y){
+  if(!n) return undefined;
+  y = (y == null ? anioAct() : y);
+  let t = n.titulo, ta = -Infinity;
+  const m = n.tituloAnio || {};
+  Object.keys(m).forEach(k => { const a = +k; if(a <= y && a > ta && m[k] != null){ t = m[k]; ta = a; } });
+  return t;
+}
+const nomAnio = n => tituloEn(n, anioAct());
+function fijarTitulo(n, y, v){
+  const s = anioSig(y), p = anioPrev(y);
+  if(s != null && esHistorico(y) && (!n.tituloAnio || n.tituloAnio[String(s)] == null)){
+    const ant = tituloEn(n, s);          /* el año siguiente conserva su nombre */
+    if(ant !== v){ if(!n.tituloAnio) n.tituloAnio = {}; n.tituloAnio[String(s)] = ant; }
+  }
+  if(y === anioBase()){ n.titulo = v; if(n.tituloAnio) delete n.tituloAnio[String(y)]; return; }
+  if(!n.tituloAnio) n.tituloAnio = {};
+  delete n.tituloAnio[String(y)];
+  if(p != null && tituloEn(n, p) === v) return;   /* igual al del año anterior: no hay cambio */
+  n.tituloAnio[String(y)] = v;
+}
 function fijarPlazas(n, y, v){
   const s = anioSig(y);
   if(s != null && esHistorico(y) && (!n.plazasAnio || n.plazasAnio[String(s)] == null)){
@@ -656,7 +679,7 @@ const resIzq = s => s.wL ? s.wL + 6 : 0;
 const resDer = s => s.wR ? s.wR + 6 : 0;
 function plan(n){
   const c = S.cfg, s = sellos(n), maxW = c.w - 14 - resIzq(s) - resDer(s);
-  const t = wrapPx(n.titulo || "(sin nombre)", maxW, c.fs, true);
+  const t = wrapPx(nomAnio(n) || "(sin nombre)", maxW, c.fs, true);
   const tit = (c.verTitular && n.titular) ? wrapPx(n.titular, maxW, c.fsc, false) : [];
   const fun = (c.verFunciones && n.funciones && n.funciones.length)
     ? n.funciones.reduce((a,f) => a.concat(wrapPx("• " + f, maxW, c.fsc, false)), []) : [];
@@ -852,7 +875,7 @@ function resumenFilas(){
   if(c.resumenPor !== "categoria"){
     F.push({ t:"h", k:"POR ÁREA (NIVEL " + (c.resumenNivel+1) + ")" });
     const arr = Object.keys(S.nodes).filter(id => P[id] && P[id].d === c.resumenNivel)
-      .map(id => ({ n: S.nodes[id].titulo || "(sin nombre)", v: totalArea(id) }))
+      .map(id => ({ n: nomAnio(S.nodes[id]) || "(sin nombre)", v: totalArea(id) }))
       .filter(x => x.v > 0).sort((a,b) => b.v - a.v);
     let vistas = 0;
     arr.slice(0,9).forEach(x => { fila(x.n, x.v); vistas += x.v; });
@@ -1116,7 +1139,7 @@ function cajetinSVG(){
       LEY.areas.forEach((n,i) => {
         const yy = y + 15 + i*15;
         out += `<rect x="${LEY.x+8}" y="${yy-9}" width="44" height="11" rx="2" fill="${n.areaColor}" stroke="${S.cfg.colBorde}" stroke-width=".7"/>`
-             + `<text class="cv2" x="${LEY.x+60}" y="${yy}">${esc(n.titulo || "(sin nombre)")}</text>`;
+             + `<text class="cv2" x="${LEY.x+60}" y="${yy}">${esc(nomAnio(n) || "(sin nombre)")}</text>`;
       });
     }
     out += `</g>`;
@@ -1198,23 +1221,23 @@ function auditar(){
   if(!m.titulo.trim()) W("El organigrama no tiene título.");
 
   const nodos = Object.values(S.nodes);
-  const sinNombre = nodos.filter(n => !n.titulo.trim()).length;
+  const sinNombre = nodos.filter(n => !nomAnio(n).trim()).length;
   if(sinNombre) E(`${sinNombre} unidad(es) sin nombre. El criterio de precisión exige definir todas las unidades con exactitud.`);
 
   /* solo es ambiguo si dos unidades con el mismo nombre dependen del mismo jefe;
      que "Preparador Físico" se repita en varios equipos es correcto */
   const vistos = {}, dup = [];
   nodos.forEach(n => {
-    const k = (n.parent || "-") + "|" + n.titulo.trim().toLowerCase();
-    if(!n.titulo.trim()) return;
-    if(vistos[k]) { if(dup.indexOf(n.titulo) < 0) dup.push(n.titulo); } else vistos[k] = 1;
+    const k = (n.parent || "-") + "|" + nomAnio(n).trim().toLowerCase();
+    if(!nomAnio(n).trim()) return;
+    if(vistos[k]) { if(dup.indexOf(nomAnio(n)) < 0) dup.push(nomAnio(n)); } else vistos[k] = 1;
   });
   if(dup.length) W("Unidades con el mismo nombre bajo el mismo jefe: " + dup.slice(0,4).map(esc).join(", ")
     + ". Ahí sí hay ambigüedad: distínguelas (por categoría, equipo o especialidad).");
 
   const tramos = nodos.map(n => ({ n, k: kidsTree(n.id).length })).filter(x => x.k > c.tramoMax);
   if(tramos.length) W(`Tramo de control amplio (más de ${c.tramoMax} subordinados directos) en: `
-    + tramos.slice(0,3).map(x => esc(x.n.titulo) + " (" + x.k + ")").join(", ") + ". Considera agrupar por departamentalización.");
+    + tramos.slice(0,3).map(x => esc(nomAnio(x.n)) + " (" + x.k + ")").join(", ") + ". Considera agrupar por departamentalización.");
 
   const prof = Math.max.apply(null, Object.values(P).map(p => p.d)) + 1;
   if(prof > c.nivelMax) W(`${prof} niveles jerárquicos. Por sencillez conviene no pasar de ${c.nivelMax}; los niveles de más se representan en un organigrama específico.`);
@@ -1225,11 +1248,11 @@ function auditar(){
     return p && p.d > 1;
   });
   if(malAdscritos.length) E("Consejos y comisiones permanentes deben ir <b>adscritos al órgano de dirección</b>, no a unidades operativas: "
-    + malAdscritos.slice(0,3).map(n => esc(n.titulo)).join(", ") + ".");
+    + malAdscritos.slice(0,3).map(n => esc(nomAnio(n))).join(", ") + ".");
 
   const staffConLinea = nodos.filter(n => !TIPOS[n.tipo].arbol && kidsTree(n.id).length);
   if(staffConLinea.length) E("Una unidad de asesoría o apoyo no debe tener unidades de línea subordinadas: "
-    + staffConLinea.slice(0,3).map(n => esc(n.titulo)).join(", ") + ".");
+    + staffConLinea.slice(0,3).map(n => esc(nomAnio(n))).join(", ") + ".");
 
   const desbordan = nodos.filter(n => plan(n).h > c.h - 6);
   if(desbordan.length) W(`${desbordan.length} caja(s) con el texto desbordado. Como todas las cajas deben medir igual, sube el <b>alto de caja</b> o acorta los nombres — no cambies el tamaño de una sola.`);
@@ -1256,7 +1279,7 @@ function auditar(){
         entregarlo. El cajetín ya lo marca como PROPUESTA.`);
     const arrastre = nodos.filter(n => n.hasta && hijosTodoAnio(n.id).some(x =>
       !x.hasta && !reasignadaEn(x, +n.hasta + 1) && padreEn(x.id, +n.hasta + 1) === n.id));
-    if(arrastre.length) W(`Al terminar ${arrastre.slice(0,2).map(n => esc(n.titulo) + " (" + n.hasta + ")").join(", ")},
+    if(arrastre.length) W(`Al terminar ${arrastre.slice(0,2).map(n => esc(nomAnio(n)) + " (" + n.hasta + ")").join(", ")},
       sus dependencias desaparecen con ella. Si esos cargos se mantienen, <b>reasígnalos</b> al jefe que los recibe
       en ${aniosOrd().filter(a => a > anioBase())[0] || ""} y siguientes; si desaparecen con ella, ponles su propio año
       de término para que quede explícito.`);
@@ -1266,14 +1289,14 @@ function auditar(){
         && (n.desde == null || +n.desde <= anioAct()) && (n.hasta == null || +n.hasta >= anioAct());
     });
     if(huerfanas.length) E(`${huerfanas.length} unidad(es) de este año dependen de una unidad que no existe en ${anioAct()}
-      (${huerfanas.slice(0,3).map(n => esc(n.titulo)).join(", ")}): no se dibujan. Reasígnalas al jefe que sí existe ese año.`);
+      (${huerfanas.slice(0,3).map(n => esc(nomAnio(n))).join(", ")}): no se dibujan. Reasígnalas al jefe que sí existe ese año.`);
   }
   const realineadas = nodos.filter(n => n.nivelVisual !== null && n.nivelVisual !== undefined && n.nivelVisual !== "");
   if(realineadas.length){
     const rotuladas = (c.bandas || []).some(x => (x||"").trim()) && c.verBandas;
     if(rotuladas) G(`${realineadas.length} unidad(es) alineadas a su banda de rango, con las bandas rotuladas: la altura se lee como nivel de puesto, no como profundidad de dependencia.`);
     else W(`${realineadas.length} unidad(es) alineadas a una banda distinta de su nivel de dependencia
-      (${realineadas.slice(0,3).map(n => esc(n.titulo)).join(", ")}). <b>Rotula las bandas</b> en Presentación
+      (${realineadas.slice(0,3).map(n => esc(nomAnio(n))).join(", ")}). <b>Rotula las bandas</b> en Presentación
       (Gerencia, Jefatura, Coordinación…): sin rótulo el lector interpreta la altura como dependencia y el
       organigrama dice algo distinto de lo que quieres.`);
   }
@@ -1283,7 +1306,7 @@ function auditar(){
   else if(ars.length) G(`${ars.length} área(s) diferenciadas por color y declaradas en la simbología.`);
   const escal = nodos.filter(n => desnivelDe(n.id) > 0);
   if(escal.length){
-    W(`${escal.length} unidad(es) escalonadas respecto de sus pares (${escal.slice(0,3).map(n => esc(n.titulo)).join(", ")}).
+    W(`${escal.length} unidad(es) escalonadas respecto de sus pares (${escal.slice(0,3).map(n => esc(nomAnio(n))).join(", ")}).
       Comunica antigüedad o grado, pero la lectura normativa asocia la <b>altura al nivel jerárquico</b>: para un estatuto
       o un manual conviene expresar esa diferencia como <b>unidad de apoyo</b> (asesoría adosada) o como subordinación real.`);
     const off = Math.max.apply(null, escal.map(n => desnivelDe(n.id))) * c.pasoDesnivel;
@@ -1320,10 +1343,12 @@ function renderNode(){
   const padreHoy = padreEn(sel, anioAct());
   const jefes = Object.values(S.nodes)
     .filter(x => x.id !== sel && descendientes(sel).indexOf(x.id) < 0)
-    .map(x => `<option value="${x.id}"${x.id===padreHoy?" selected":""}>${esc(x.titulo||"(sin nombre)")}</option>`).join("");
+    .map(x => `<option value="${x.id}"${x.id===padreHoy?" selected":""}>${esc(nomAnio(x)||"(sin nombre)")}</option>`).join("");
   const reas = aniosReasignada(n);
   box.innerHTML = `<div id="ndTitle"><span>Unidad</span><em>nivel ${p.d+1}</em></div>
-    <div class="f wide"><label>Nombre de la unidad</label><input id="fTit" value="${esc(n.titulo)}"></div>
+    <div class="f wide"><label>Nombre de la unidad${aniosOrd().length > 1 ? " en " + anioAct() : ""}</label><input id="fTit" value="${esc(nomAnio(n))}">${
+      (() => { const p = anioPrev(); const a = p != null && visibleEn(n.id, p) ? tituloEn(n, p) : null;
+        return a != null && a !== nomAnio(n) ? `<p class="hint" style="margin:4px 0 0">En ${p} se llamaba <b>${esc(a)}</b>.</p>` : ""; })()}</div>
     <div class="f wide"><label>Titular o cargo (opcional)</label><input id="fTitular" value="${esc(n.titular)}"></div>
     <div class="f"><label>N.º de personas ${aniosOrd().length > 1 ? "en <b>"+anioAct()+"</b>" : ""}</label>
       <input type="number" id="fPers" min="0" max="99999" step="1"
@@ -1358,7 +1383,7 @@ function renderNode(){
       <select id="fJefe"${n.parent?"":" disabled"}>${
       n.parent ? jefes : `<option>— órgano máximo —</option>` }</select></div>
     ${ reas.length ? `<p class="hint" style="margin:0 0 6px">Reasignaciones: ${reas.map(a =>
-        `<b>${a}</b> → ${esc((S.nodes[n.parentAnio[String(a)]]||{}).titulo || "?")}`).join(" · ")}
+        `<b>${a}</b> → ${esc(nomAnio((S.nodes[n.parentAnio[String(a)]]||{})) || "?")}`).join(" · ")}
       ${ reas.indexOf(anioAct()) >= 0 ? `<button class="b" id="btNoReas" style="margin-top:4px;padding:2px 6px">Anular la reasignación de ${anioAct()}</button>` : "" }</p>` : "" }
     ${ (t.arbol && n.parent) ? `<div class="f"><label>Altura (banda)</label><select id="fBanda">${
       opcionesBanda(n, p)
@@ -1371,7 +1396,7 @@ function renderNode(){
     ${ n.color ? `<div class="btnrow"><button class="b" id="btNoColor">Quitar color propio</button></div>` : "" }
     <div class="f"><label>Color del área</label><input type="color" id="fArea" value="${n.areaColor || colorDe(sel) || S.cfg.colFondo}"></div>
     ${ n.areaColor ? `<div class="btnrow"><button class="b" id="btNoArea">Quitar el área</button></div>`
-      : (areaDe(sel) ? `<p class="hint" style="margin:0 0 6px">Hereda el color del área <b>${esc(areaDe(sel).titulo)}</b>.</p>` : "") }
+      : (areaDe(sel) ? `<p class="hint" style="margin:0 0 6px">Hereda el color del área <b>${esc(nomAnio(areaDe(sel)))}</b>.</p>` : "") }
     <div class="f wide"><label>Funciones (una por línea)</label><textarea id="fFun" rows="3">${esc((n.funciones||[]).join("\n"))}</textarea></div>
     <div class="btnrow">
       <button class="b" id="btUp" title="Mover antes entre hermanas">&#9664;</button>
@@ -1384,7 +1409,7 @@ function renderNode(){
     <p class="hint">${esc(t.des)}</p>`;
 
   const setTxt = (id, fn) => { const e = $(id); if(e) e.oninput = () => { fn(e.value); autosave(); renderCanvas(); renderAudit(); }; };
-  setTxt("#fTit", v => { n.titulo = v; });
+  setTxt("#fTit", v => { fijarTitulo(n, anioAct(), v); });
   setTxt("#fTitular", v => { n.titular = v; });
   const fFun = $("#fFun");
   if(fFun) fFun.oninput = () => { n.funciones = fFun.value.split("\n").map(s=>s.trim()).filter(Boolean); autosave(); renderCanvas(); renderAudit(); };
@@ -1642,7 +1667,7 @@ function quitarAnioActual(){
   if(!esPrimero && !esUltimo){ status("Solo se puede quitar el primer o el último año"); return; }
   const usan = Object.values(S.nodes).filter(n =>
     +n.desde === y || +n.hasta === y || (n.plazasAnio||{})[String(y)] != null
-    || (n.parentAnio||{})[String(y)] != null).length;
+    || (n.parentAnio||{})[String(y)] != null || (n.tituloAnio||{})[String(y)] != null).length;
   const quedan = A.filter(a => a !== y);
   /* Lo que solo existía en el año que se quita se elimina. Si no, al borrarle
      desde/hasta pasaría a existir en todos los años. */
@@ -1677,6 +1702,8 @@ function quitarAnioActual(){
       if(n.plazasAnio) Object.keys(n.plazasAnio).forEach(k => { if(+k <= nb) delete n.plazasAnio[k]; });
       if(n.desde != null && n.desde !== "" && +n.desde <= nb) n.desde = null;
       if(n.parentAnio) Object.keys(n.parentAnio).forEach(k => { if(+k <= nb) delete n.parentAnio[k]; });
+      n.titulo = tituloEn(n, nb);
+      if(n.tituloAnio) Object.keys(n.tituloAnio).forEach(k => { if(+k <= nb) delete n.tituloAnio[k]; });
     });
   }
   Object.values(S.nodes).forEach(n => {
@@ -1688,6 +1715,7 @@ function quitarAnioActual(){
     if(esUltimo && +n.hasta === quedan[quedan.length-1]) n.hasta = null;
     if(n.plazasAnio) delete n.plazasAnio[String(y)];
     if(n.parentAnio) delete n.parentAnio[String(y)];
+    if(n.tituloAnio) delete n.tituloAnio[String(y)];
   });
   S.cfg.anios = quedan;
   if(quedan.indexOf(+S.cfg.anioVigente) < 0) S.cfg.anioVigente = quedan[0];
@@ -1718,7 +1746,8 @@ function partirDeEsteAnio(){
     Object.keys(S.nodes).filter(id => visibleEn(id, y)).forEach(id => {
       const n = S.nodes[id];
       nuevos[id] = Object.assign(clone(n), { parent: id === S.root ? null : padreEn(id, y),
-        personas: plazasEn(n, y), desde:null, hasta:null, plazasAnio:{}, parentAnio:{} });
+        titulo: tituloEn(n, y), personas: plazasEn(n, y), desde:null, hasta:null,
+        plazasAnio:{}, parentAnio:{}, tituloAnio:{} });
     });
     S.nodes = nuevos;
     S.rel = S.rel.filter(r => S.nodes[r.a] && S.nodes[r.b]);
@@ -1755,9 +1784,9 @@ function exportCSV(){
     const n = S.nodes[id], p = P[id], ar = areaDe(id);
     L.push([ prof[id] + 1,
       q(p ? ((S.cfg.bandas[p.b] || "").trim() || ("Nivel " + ((p.b||0)+1))) : "no existe en " + anioAct()),
-      q(ar ? ar.titulo : ""), q(n.titulo), q(TIPOS[n.tipo].nom),
-      q(n.parent ? (S.nodes[padreEn(id, anioAct())]||{}).titulo : "—"),
-      q(aniosReasignada(n).map(a => a + ": " + ((S.nodes[n.parentAnio[String(a)]]||{}).titulo||"")).join(" | ")),
+      q(ar ? nomAnio(ar) : ""), q(nomAnio(n)), q(TIPOS[n.tipo].nom),
+      q(n.parent ? nomAnio(S.nodes[padreEn(id, anioAct())]) : "—"),
+      q(aniosReasignada(n).map(a => a + ": " + (nomAnio((S.nodes[n.parentAnio[String(a)]]||{}))||"")).join(" | ")),
       q(n.categoria || ""), n.desde || A[0], n.hasta || "" ]
       .concat(A.map(a => visibleEn(id, a) ? (plazasEn(n, a) == null ? "" : plazasEn(n, a)) : ""))
       .concat([ p ? totalArea(id) : "", q(n.titular || "") ]).join(";"));
@@ -1786,7 +1815,7 @@ function renderAnios(){
 }
 function renderRels(){
   $("#relList").innerHTML = S.rel.length
-    ? S.rel.map((r,i) => `<div class="relrow"><span>${esc((S.nodes[r.a]||{}).titulo||"?")} ↔ ${esc((S.nodes[r.b]||{}).titulo||"?")}</span>
+    ? S.rel.map((r,i) => `<div class="relrow"><span>${esc(nomAnio((S.nodes[r.a]||{}))||"?")} ↔ ${esc(nomAnio((S.nodes[r.b]||{}))||"?")}</span>
         <button data-rel="${i}" title="Quitar">&times;</button></div>`).join("")
     : `<p class="hint">Sin relaciones de coordinación.</p>`;
   document.querySelectorAll("[data-rel]").forEach(b => b.onclick = () => {
@@ -1865,8 +1894,8 @@ function borrar(){
     txt = `<b>Dar de baja desde ${y}</b><br>Desaparece de ${vive.slice(i).join(", ")}; `
         + `${vive.slice(0, i).join(", ")} no cambian. Un cargo no puede faltar solo en un año del medio.`;
   }
-  modal("Quitar " + esc(n.titulo), `<div class="abox">
-      <p>"${esc(n.titulo)}" aparece en ${vive.join(", ")}. ¿Qué quieres hacer?</p>
+  modal("Quitar " + esc(nomAnio(n)), `<div class="abox">
+      <p>"${esc(nomAnio(n))}" aparece en ${vive.join(", ")}. ¿Qué quieres hacer?</p>
       ${dep ? `<p>Los <b>${dep}</b> cargo(s) que dependen de él en ${y} también salen de ese año. Si alguno
         seguía con otro jefe, reasígnalo antes.</p>` : ""}</div>
     <div class="btnrow" style="flex-direction:column;align-items:stretch;gap:8px">
@@ -1876,7 +1905,7 @@ function borrar(){
     </div>`);
   $("#bqAnio").onclick = () => {
     closeModal(); snap(); op(); sel = padreEn(id, y) || S.root; refresh();
-    status(`"${n.titulo}" quitado de ${y}; los demás años quedan igual`);
+    status(`"${nomAnio(n)}" quitado de ${y}; los demás años quedan igual`);
   };
   $("#bqTodo").onclick = () => { closeModal(); borrarDelTodo(); };
   $("#bqAnio").focus();
@@ -1884,7 +1913,7 @@ function borrar(){
 function borrarDelTodo(){
   if(!sel || !S.nodes[sel] || !S.nodes[sel].parent) return;
   const hijos = descendientesTodos(sel);   /* de cualquier año, para no dejar huérfanas */
-  if(hijos.length && !confirm(`Se eliminará "${S.nodes[sel].titulo}" y ${hijos.length} unidad(es) que dependen de ella en algún año. ¿Continuar?`)) return;
+  if(hijos.length && !confirm(`Se eliminará "${nomAnio(S.nodes[sel])}" y ${hijos.length} unidad(es) que dependen de ella en algún año. ¿Continuar?`)) return;
   snap();
   const p = S.nodes[sel].parent;
   const fuera = hijos.concat([sel]);
@@ -1931,10 +1960,10 @@ function reasignar(id, nuevoPadre){
   normalizarOrden(viejo); normalizarOrden(nuevoPadre);
   refresh();
   status(esHistorico(y)
-    ? `En ${y}, "${n.titulo}" dependía de "${S.nodes[nuevoPadre].titulo}"; ${s} no cambia`
+    ? `En ${y}, "${nomAnio(n)}" dependía de "${nomAnio(S.nodes[nuevoPadre])}"; ${s} no cambia`
     : y === anioBase()
-    ? `"${n.titulo}" ahora depende de "${S.nodes[nuevoPadre].titulo}"`
-    : `Desde ${y}, "${n.titulo}" pasa a depender de "${S.nodes[nuevoPadre].titulo}"`);
+    ? `"${nomAnio(n)}" ahora depende de "${nomAnio(S.nodes[nuevoPadre])}"`
+    : `Desde ${y}, "${nomAnio(n)}" pasa a depender de "${nomAnio(S.nodes[nuevoPadre])}"`);
 }
 
 /* ============================ ARCHIVO Y EXPORTACIÓN ====================== */
@@ -2203,7 +2232,7 @@ function initEventos(){
         if(e) e.classList.add("tgt");
       }
       drag.target = t;
-      $("#hud").textContent = t ? `Soltar para que dependa de "${S.nodes[t].titulo}"` : "Suelta sobre una unidad para cambiar de jefe";
+      $("#hud").textContent = t ? `Soltar para que dependa de "${nomAnio(S.nodes[t])}"` : "Suelta sobre una unidad para cambiar de jefe";
     }
   });
   window.addEventListener("mouseup", () => {
