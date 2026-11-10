@@ -1562,7 +1562,8 @@ function renderPlaza(){
     }</select></div>
     <div class="btnrow"><button class="b danger" id="zQuitarAnio"${
       (anioAct()===A[0]||anioAct()===A[A.length-1])?"":" disabled"
-    } title="${(anioAct()===A[0]||anioAct()===A[A.length-1])?"Quita "+anioAct()+" del plan":"Solo se puede quitar el primer o el último año"}">Quitar ${anioAct()}</button></div>`:""}
+    } title="${(anioAct()===A[0]||anioAct()===A[A.length-1])?"Quita "+anioAct()+" del plan":"Solo se puede quitar el primer o el último año. Para quedarte con uno, usa Partir de "+anioAct()}">Quitar ${anioAct()}</button>
+      <button class="b" id="zPartir" title="Organigrama nuevo solo con ${anioAct()}, sin tocar el archivo actual">Partir de ${anioAct()}</button></div>`:""}
     ${A.length>1?`<div class="f chk"><input type="checkbox" id="zCrec"${c.verCrecimiento?" checked":""}><label>Resaltar crecimiento del año</label></div>
       <div class="f"><label>Color del resalte</label><input type="color" id="zColNvo" value="${c.colNuevoBorde}"></div>`:""}
     <div class="f chk"><input type="checkbox" id="zPl"${c.verPlazas?" checked":""}><label>Mostrar n.º de personas en las cajas</label></div>
@@ -1592,6 +1593,7 @@ function renderPlaza(){
   $("#zMasAnio").onclick = agregarAnio;
   $("#zAntesAnio").onclick = agregarAnioAnterior;
   if($("#zQuitarAnio")) $("#zQuitarAnio").onclick = quitarAnioActual;
+  if($("#zPartir")) $("#zPartir").onclick = partirDeEsteAnio;
   if($("#zVigente")) $("#zVigente").onchange = e => { snap(); S.cfg.anioVigente = +e.target.value; refresh(); };
   if($("#zCrec")) $("#zCrec").onchange = e => { c.verCrecimiento = e.target.checked; refresh(); };
   if($("#zColNvo")) $("#zColNvo").oninput = e => { c.colNuevoBorde = e.target.value;
@@ -1638,10 +1640,30 @@ function quitarAnioActual(){
   const usan = Object.values(S.nodes).filter(n =>
     +n.desde === y || +n.hasta === y || (n.plazasAnio||{})[String(y)] != null
     || (n.parentAnio||{})[String(y)] != null).length;
-  if(usan && !confirm(usan + " unidad(es) tienen datos de " + y
+  const quedan = A.filter(a => a !== y);
+  /* Lo que solo existía en el año que se quita se elimina. Si no, al borrarle
+     desde/hasta pasaría a existir en todos los años. */
+  const muertos = {};
+  Object.values(S.nodes).forEach(n => {
+    const d = (n.desde == null || n.desde === "") ? -Infinity : +n.desde;
+    const h = (n.hasta == null || n.hasta === "") ? Infinity : +n.hasta;
+    if(n.id !== S.root && !quedan.some(a => a >= d && a <= h)) muertos[n.id] = 1;
+  });
+  let otra = true;
+  while(otra){ otra = false;      /* y lo que colgaba de ellos desde siempre */
+    Object.values(S.nodes).forEach(n => {
+      if(!muertos[n.id] && n.parent && muertos[n.parent]){ muertos[n.id] = 1; otra = true; } });
+  }
+  const nMuertos = Object.keys(muertos).length;
+  if((usan || nMuertos) && !confirm(usan + " unidad(es) tienen datos de " + y
+      + (nMuertos ? ", y " + nMuertos + " solo existen en " + y + " y se eliminan" : "")
       + ". ¿Quitar el año igual? Esos datos se pierden.")) return;
   snap();
-  const quedan = A.filter(a => a !== y);
+  Object.keys(muertos).forEach(id => { delete S.nodes[id]; });
+  Object.values(S.nodes).forEach(n => {
+    Object.keys(n.parentAnio || {}).forEach(k => { if(muertos[n.parentAnio[k]]) delete n.parentAnio[k]; });
+  });
+  S.rel = S.rel.filter(r => S.nodes[r.a] && S.nodes[r.b]);
   if(esPrimero){
     /* el siguiente pasa a ser base: su valor deja plazasAnio y vuelve a personas,
        que es donde vive el año base. Se calcula ANTES de cambiar la lista. */
@@ -1663,6 +1685,53 @@ function quitarAnioActual(){
   S.cfg.anios = quedan;
   if(quedan.indexOf(+S.cfg.anioVigente) < 0) S.cfg.anioVigente = quedan[0];
   irAnio(esPrimero ? quedan[0] : quedan[quedan.length - 1]);
+}
+/* Partir de un año: un organigrama de un solo año, con los cargos, jefes y
+   personas tal como se ven en el que estás viendo. El archivo vinculado no se
+   toca: se desvincula ANTES de cambiar nada, porque el autoguardado escribiría
+   el organigrama recortado encima del plan completo. */
+function partirDeEsteAnio(){
+  const y = anioAct(), A = aniosOrd(), h = PS.archivo();
+  const cargos = Object.keys(S.nodes).filter(id => visibleEn(id, y)).length;
+  modal("Partir de " + y, `<div class="abox">
+      <p>Se arma un organigrama <b>solo con ${y}</b>: sus ${cargos} unidades, con el jefe y las personas que
+      tienen ese año. Los demás años (${A.filter(a => a !== y).join(", ")}) no pasan al nuevo.</p>
+      ${h ? `<p>Tu archivo <b>${esc(h.name)}</b> no se toca: se desvincula, y después eliges dónde guardar el nuevo.</p>`
+          : `<p>Como no hay archivo vinculado, primero se descarga una copia del plan completo, por si la necesitas.</p>`}
+    </div>
+    <div class="btnrow"><button class="b on" id="ptSi">Partir de ${y}</button>
+      <button class="b" id="ptNo">Cancelar</button></div>`);
+  $("#ptNo").onclick = closeModal;
+  $("#ptSi").onclick = async () => {
+    if(h) await PS.desvincular();
+    else bajar(slug().replace(/-\d{4}$/, "") + "-plan-" + A[0] + "-" + A[A.length-1] + ".org.json",
+      new Blob([JSON.stringify(S, null, 2)], { type:"application/json" }));
+    snap();
+    const nuevos = {};
+    Object.keys(S.nodes).filter(id => visibleEn(id, y)).forEach(id => {
+      const n = S.nodes[id];
+      nuevos[id] = Object.assign(clone(n), { parent: id === S.root ? null : padreEn(id, y),
+        personas: plazasEn(n, y), desde:null, hasta:null, plazasAnio:{}, parentAnio:{} });
+    });
+    S.nodes = nuevos;
+    S.rel = S.rel.filter(r => S.nodes[r.a] && S.nodes[r.b]);
+    S.cfg.anios = [y]; S.cfg.anio = y; S.cfg.anioVigente = null;
+    Object.keys(S.nodes).forEach(id => normalizarOrden(id));
+    sel = null; refresh(); fitView();
+    pintarPildora("Sin archivo vinculado", "");
+    modal("Organigrama " + y, `<div class="abox"><p>Listo: el organigrama quedó solo con <b>${y}</b>
+        (${Object.keys(S.nodes).length} unidades). ${h ? `<b>${esc(h.name)}</b> sigue con el plan completo.` : ""}</p>
+        <p>Guárdalo con un nombre nuevo para no confundirlo con el plan anterior. Desde aquí puedes
+        volver a agregar ${y + 1} y siguientes.</p></div>
+      <div class="btnrow"><button class="b on" id="ptGuardar">Guardar como archivo nuevo…</button>
+        <button class="b" id="ptLuego">Después</button></div>`);
+    $("#ptLuego").onclick = closeModal;
+    $("#ptGuardar").onclick = async () => {
+      const r = await PS.archivoNuevo();
+      closeModal(); refresh();
+      if(r && r.ok) status("Guardado en " + (PS.archivo() ? PS.archivo().name : "el archivo nuevo"));
+    };
+  };
 }
 function exportCSV(){
   layout();

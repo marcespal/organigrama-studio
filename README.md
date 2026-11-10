@@ -69,7 +69,12 @@ que se ve y lo que se edita; con el botón **+** se agrega el año siguiente.
   desde ahí) o, aparte, eliminarlo de todos los años.
 - **Quitar un año**: el botón quita el que estás viendo, y solo si es el primero o el último — sacar
   uno del medio dejaría huecos en los arrastres y en las reasignaciones. Si quitas el primero, el
-  siguiente vuelve a ser el base con sus propios valores.
+  siguiente vuelve a ser el base con sus propios valores. Los cargos que solo existían en el año
+  quitado se eliminan (antes pasaban a existir en todos los años).
+- **Partir de un año**: arma un organigrama nuevo solo con el año que estás viendo — sus cargos,
+  con el jefe y las personas de ese año. El archivo vinculado no se toca: se desvincula antes de
+  cambiar nada y luego se ofrece guardar con otro nombre. Sin archivo vinculado, primero se
+  descarga una copia del plan completo.
 - **Existe desde / Existe hasta** por unidad: las que todavía no existen no se dibujan en los años
   anteriores, y las dadas de baja desaparecen del año siguiente al que declares.
 - **N.º de personas es por año**, con arrastre: declaras 2 en 2026 y 4 en 2027, y los años sin dato
